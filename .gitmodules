@@ -1,0 +1,4 @@
+[submodule "utilities"]
+	path = utilities
+	url = https://github.com/Multfinite/cpp_utilities.git
+	branch = master
