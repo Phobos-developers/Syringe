@@ -1,0 +1,13 @@
+{
+    "name": "injector",
+    "version-string": "1.0.0",
+    "dependencies": [
+      {
+        "name": "vcpkg-cmake",
+        "host": true
+      },
+      {
+        "name": "spdlog"
+      }
+    ]
+}

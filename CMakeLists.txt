@@ -1,0 +1,26 @@
+﻿cmake_minimum_required (VERSION 3.8)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+#set(CMAKE_CXX_COMPILER_ID "MSVC")
+
+if (POLICY CMP0141)
+  cmake_policy(SET CMP0141 NEW)
+  set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
+endif()
+
+if(WIN32)
+	message("OS: WIN32")
+elseif(UNIX)
+	message("OS: UNIX")
+else()
+	message("OS: OTHER")
+endif()
+
+include_directories("${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include")
+link_directories("${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib")
+
+project("Injector")
+#add_subdirectory("utilities")
+add_subdirectory("debugger")
+add_subdirectory("injector")
+add_subdirectory("syringe")
