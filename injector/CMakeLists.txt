@@ -34,11 +34,11 @@ include_directories("${CMAKE_SOURCE_DIR}/include")
 add_library (injector_lib ${src})
 
 find_package(fmt CONFIG REQUIRED)
-target_link_libraries(injector_lib PRIVATE fmt::fmt-header-only)
+target_link_libraries(injector_lib PUBLIC fmt::fmt-header-only)
 
 find_package(spdlog CONFIG REQUIRED)
-target_link_libraries(injector_lib PRIVATE spdlog::spdlog spdlog::spdlog_header_only)
+target_link_libraries(injector_lib PUBLIC spdlog::spdlog spdlog::spdlog_header_only)
 
-target_link_libraries(injector_lib PRIVATE Version)
+target_link_libraries(injector_lib PUBLIC Version)
 
 message("project: injector - done")
