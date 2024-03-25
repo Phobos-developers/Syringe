@@ -91,6 +91,79 @@ namespace Injector
             else throw construct_error_no_msg(file_read_error);
         }
     }
+    void Module::parse_function_replacements_type0()
+    {
+        size_t const declSize = sizeof(FunctionReplacement0Decl);
+
+        auto const base = _pe.PEHeader.OptionalHeader.ImageBase;
+
+        auto& section = _pe.find_section(ExtendedHooksPESectionName);
+        auto const begin = section.PointerToRawData;
+        auto const end = begin + section.SizeOfRawData;
+
+        for (auto ptr = begin; ptr < end; ptr += declSize)
+        {
+            FunctionReplacement0Decl fr;
+            if (PE::read_bytes(_ifs, ptr, declSize, &fr))
+            {
+                // msvc linker inserts arbitrary padding between variables that come
+                // from different translation units
+                if (fr.FunctionNamePtr)
+                {
+                    std::string functionName;
+                    std::string moduleName;
+                    std::string originalName;
+                    if (PE::read_cstring(_ifs, PE::virtual_to_raw(fr.FunctionNamePtr - base, _pe.Sections), functionName) &&
+                        PE::read_cstring(_ifs, PE::virtual_to_raw(fr.ModuleNamePtr - base, _pe.Sections), moduleName) &&
+                        PE::read_cstring(_ifs, PE::virtual_to_raw(fr.OriginalFunctionNamePtr - base, _pe.Sections), originalName)
+                        
+                    ) {
+                        Hook& hook = Hooks.emplace_back(functionName, fr);
+                        hook.PlacementFunction = originalName;
+                        hook.Size = 0; // jmp real size is 5
+                        hook.ModuleName = moduleName;
+                        hook.ModuleChecksum = fr.ModuleChecksum;
+                    }
+                }
+            }
+            else throw construct_error_no_msg(file_read_error);
+        }
+    }
+    void Module::parse_function_replacements_type1()
+    {
+        size_t const declSize = sizeof(FunctionReplacement1Decl);
+
+        auto const base = _pe.PEHeader.OptionalHeader.ImageBase;
+
+        auto& section = _pe.find_section(ExtendedHooksPESectionName);
+        auto const begin = section.PointerToRawData;
+        auto const end = begin + section.SizeOfRawData;
+
+        for (auto ptr = begin; ptr < end; ptr += declSize)
+        {
+            FunctionReplacement1Decl fr;
+            if (PE::read_bytes(_ifs, ptr, declSize, &fr))
+            {
+                // msvc linker inserts arbitrary padding between variables that come
+                // from different translation units
+                if (fr.FunctionNamePtr)
+                {
+                    std::string functionName;
+                    std::string moduleName;
+                    if (PE::read_cstring(_ifs, PE::virtual_to_raw(fr.FunctionNamePtr - base, _pe.Sections), functionName) &&
+                        PE::read_cstring(_ifs, PE::virtual_to_raw(fr.ModuleNamePtr - base, _pe.Sections), moduleName)
+                    ) {
+                        Hook& hook = Hooks.emplace_back(functionName, fr);
+                        hook.Placement = reinterpret_cast<Address>(fr.Address);
+                        hook.Size = 0; // jmp real size is 5
+                        hook.ModuleName = moduleName;
+                        hook.ModuleChecksum = fr.ModuleChecksum;
+                    }
+                }
+            }
+            else throw construct_error_no_msg(file_read_error);
+        }
+    }
     void Module::parse_inj_file(string_view const& injFileName)
     {
         std::string inj = file_read_text(injFileName.data());
@@ -132,9 +205,17 @@ namespace Injector
         if (!_injectorHandle.get())
             throw construct_error_args_no_msg(load_library_error, fileName);
 
+        try { FVI.Load(FileName); }
+        catch (const Utilities::FileVersionInformation::fvi_load_error&)
+        {
+            throw construct_error(file_read_error, "Unable to read FileVersionInformation");
+        }
+
         try { parse_hosts();          } catch(const PE::section_not_found_error&) { };
         try { parse_generic_hooks();  } catch(const PE::section_not_found_error&) { };
         try { parse_extended_hooks(); } catch(const PE::section_not_found_error&) { };
+        try { parse_function_replacements_type0(); } catch(const PE::section_not_found_error&) { };
+        try { parse_function_replacements_type1(); } catch(const PE::section_not_found_error&) { };
     }
     Module::Module(string_view const& fileName, string_view const& injFileName)
     {
@@ -151,6 +232,12 @@ namespace Injector
 
         if (!_injectorHandle.get())
             throw construct_error_args_no_msg(load_library_error, fileName);
+
+        try { FVI.Load(FileName); }
+        catch (const Utilities::FileVersionInformation::fvi_load_error&)
+        {
+            throw construct_error(file_read_error, "Unable to read FileVersionInformation");
+        }
 
         try { parse_inj_file(injFileName); } catch(const file_not_found_error&) { throw construct_error_args_no_msg(non_injectable_module_error, fileName, non_injectable_module_error::Type::MissingInj); };
     }

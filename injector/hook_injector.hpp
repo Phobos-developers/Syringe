@@ -150,6 +150,14 @@ namespace Injector
         JumpCode             JumpBackCode;
     };
     
+    
+    struct Facade
+    {
+        Hook* Redefine;
+
+        JumpCode             FacadeCallerBlockCode;
+    };
+
     class HookInjector final
     {
     public:
@@ -160,6 +168,7 @@ namespace Injector
         VirtualMemoryHandle*     ProgramVmh;
         
         map<Address, HookPocket> Pockets;
+        map<Address, Facade> Facades;
 
         HookInjector(Debugger::DebugLoop& dbg, list<Module>& modules);
         ~HookInjector();

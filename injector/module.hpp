@@ -4,6 +4,7 @@
 #include <portable_executable.hpp>
 #include <handle.win.hpp>
 #include <exceptions.win.hpp>
+#include <winapi.utilities.hpp>
 
 #include "framework.hpp"
 #include "hook.hpp"
@@ -54,10 +55,11 @@ namespace Injector
         };
 
         string       FileName;
+        Utilities::FileVersionInformation FVI;
         unsigned int Checksum;
         list<Hook>   Hooks;
         list<Host>   Hosts;
-        // it's idea about Initialize(...) function concept, which invokes before main thread resumed or at moment when it's resumed. Invokcation not implemented. Just use hook at top of program.
+        // it's idea about Initialize(...) function concept, which invokes before main thread resumed or at moment when it's resumed. Invocation not implemented. Just use hook at top of program.
         InitFunction InitFunction;
     private:
         HMODULE                    _handle;
@@ -68,6 +70,8 @@ namespace Injector
         void parse_hosts();
         void parse_generic_hooks();
         void parse_extended_hooks();
+        void parse_function_replacements_type0();
+        void parse_function_replacements_type1();
         void parse_inj_file(string_view const& injFileName);
     public:
         std::istream&                     stream()   { return _ifs; }

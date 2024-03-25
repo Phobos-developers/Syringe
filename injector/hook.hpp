@@ -13,12 +13,16 @@ namespace Injector
         Generic  = 1,
         /* ExtendedHookDecl */
         Extended = 2,
+        /* FunctionReplacemen0tDecl */
+        FacadeByName = 3,
+        /* FunctionReplacement1Decl */
+        FacadeAtAddress = 4
     };
     class Hook final
     {
         friend class Module;
     public:
-        using Variant = std::variant<HookDecl, ExtendedHookDecl>;
+        using Variant = std::variant<HookDecl, ExtendedHookDecl, FunctionReplacement0Decl, FunctionReplacement1Decl>;
 
         HookType    const Type = HookType::Unknown;
         Variant     const Decl;
@@ -26,6 +30,7 @@ namespace Injector
 
         HookFunction Function       { nullptr };
         Address      Placement      { nullptr };
+        std::string  PlacementFunction { nullptr };
         Address      ModuleBase     { nullptr };
         std::string  ModuleName     = "";
         unsigned int ModuleChecksum = 0;
@@ -35,6 +40,8 @@ namespace Injector
         Hook(std::string functionName, Address address, size_t size);
         Hook(std::string functionName, HookDecl& decl);
         Hook(std::string functionName, ExtendedHookDecl& decl);
+        Hook(std::string functionName, FunctionReplacement0Decl& decl);
+        Hook(std::string functionName, FunctionReplacement1Decl& decl);
     };
 }
 

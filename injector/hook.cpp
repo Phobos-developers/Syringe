@@ -23,4 +23,14 @@ namespace Injector
         FunctionName(functionName),
         Decl(decl)
     {}
+    Hook::Hook(std::string functionName, FunctionReplacement0Decl& decl) :
+        Type(HookType::FacadeByName),
+        FunctionName(functionName),
+        Decl(decl)
+    {}
+    Hook::Hook(std::string functionName, FunctionReplacement1Decl& decl) :
+        Type(HookType::FacadeAtAddress),
+        FunctionName(functionName),
+        Decl(decl)
+    {}
 }

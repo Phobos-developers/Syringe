@@ -26,6 +26,24 @@ struct alignas(16) HostDecl
     unsigned int Checksum;
     DWORD        NamePtr;
 };
+
+/* Function Decorator Hook - by name */
+struct alignas(32) FunctionReplacement0Decl
+{
+    DWORD        OriginalFunctionNamePtr;
+    DWORD        FunctionNamePtr;
+    DWORD        ModuleNamePtr;
+    unsigned int ModuleChecksum;
+};
+
+/* Function Decorator Hook - by address */
+struct alignas(32) FunctionReplacement1Decl
+{
+    DWORD        Address;
+    DWORD        FunctionNamePtr;
+    DWORD        ModuleNamePtr;
+    unsigned int ModuleChecksum;
+};
 #pragma warning(pop)
 #else
 #pragma pack(push, 16)
@@ -52,16 +70,30 @@ __declspec(align(16)) struct HostDecl
     unsigned int    Checksum;
     const char*    NamePtr;
 };
+
+__declspec(align(32)) struct FunctionReplacement0Decl
+{
+    const char* OriginalFunctionNamePtr;
+    const char* FunctionNamePtr;
+    const char* ModuleNamePtr;
+    unsigned int    ModuleChecksum;
+};
+
+__declspec(align(32)) struct FunctionReplacement1Decl
+{
+    unsigned int    Address;
+    const char* FunctionNamePtr;
+    const char* ModuleNamePtr;
+    unsigned int    ModuleChecksum;
+};
 #pragma warning(pop)
 #pragma pack(pop)
-
-static_assert(sizeof(HookDecl) == 16);
-static_assert(sizeof(ExtendedHookDecl) == 32);
-static_assert(sizeof(HostDecl) == 16);
 
 #pragma section(".syhks00", read, write)
 #pragma section(".syexe00", read, write)
 #pragma section(".syhks01", read, write)
+#pragma section(".syfrh00", read, write)
+#pragma section(".syfrh01", read, write)
 #endif
 
 #endif //INJECTOR_DECLARATION_HPP

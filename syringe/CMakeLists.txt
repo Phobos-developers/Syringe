@@ -35,14 +35,14 @@ include_directories("${CMAKE_SOURCE_DIR}/injector")
 add_executable (syringe ${src})
 
 find_package(fmt CONFIG REQUIRED)
-target_link_libraries(syringe PRIVATE fmt::fmt-header-only)
+target_link_libraries(syringe PUBLIC  fmt::fmt-header-only)
 
 find_package(spdlog CONFIG REQUIRED)
-target_link_libraries(syringe PRIVATE spdlog::spdlog spdlog::spdlog_header_only)
+target_link_libraries(syringe PUBLIC spdlog::spdlog spdlog::spdlog_header_only)
 
 target_link_libraries (syringe LINK_PUBLIC -Wl,--allow-multiple-definition debugger_lib -Wl,--allow-multiple-definition)
 target_link_libraries (syringe LINK_PUBLIC -Wl,--allow-multiple-definition injector_lib -Wl,--allow-multiple-definition)
 
-target_link_libraries(syringe PRIVATE Version)
+target_link_libraries(syringe PUBLIC Version)
 
 message("project: syringe - done")

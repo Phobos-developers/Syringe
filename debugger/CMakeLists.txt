@@ -32,11 +32,11 @@ include_directories("${CMAKE_SOURCE_DIR}/utilities")
 add_library (debugger_lib STATIC ${src})
 
 find_package(fmt CONFIG REQUIRED)
-target_link_libraries(debugger_lib PRIVATE fmt::fmt-header-only)
+target_link_libraries(debugger_lib PUBLIC fmt::fmt-header-only)
 
 find_package(spdlog CONFIG REQUIRED)
-target_link_libraries(debugger_lib PRIVATE spdlog::spdlog spdlog::spdlog_header_only)
+target_link_libraries(debugger_lib PUBLIC spdlog::spdlog spdlog::spdlog_header_only)
 
-target_link_libraries(debugger_lib PRIVATE Version)
+target_link_libraries(debugger_lib PUBLIC Version)
 
 message("project: debugger - done")
