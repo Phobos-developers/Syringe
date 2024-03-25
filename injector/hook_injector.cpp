@@ -19,6 +19,9 @@ namespace Injector
             
             for (auto& hook : mdl.Hooks)
             {
+                bool isInExecutable = hook.ModuleName.empty();
+                auto hookModuleName = isInExecutable ? "executable" : "\"" + hook.ModuleName + "\"";
+
                 if (!hook.Function)
                 {
                     spdlog::warn("::Hook \"{0}\" function not found, skip. -Please, sure that hooks were scanned correctly.", hook.FunctionName);
@@ -27,9 +30,9 @@ namespace Injector
 
                 auto checksum  = executableChecksum;
                 auto placement = hook.Placement;
-                if (!hook.ModuleName.empty())
+                if (!isInExecutable)
                 {
-                    auto iter = std::find_if(dbgr.Dlls.cbegin(), dbgr.Dlls.cend(), 
+                    auto inProcessDll = std::find_if(dbgr.Dlls.cbegin(), dbgr.Dlls.cend(), 
                         [&hook, &dbgr](DllMap::value_type pair) -> bool
                         {
                             auto ofnp = std::filesystem::path(pair.second.FVI.Loaded ? pair.second.FVI.OriginalFilename : pair.second.FileName);
@@ -39,7 +42,7 @@ namespace Injector
                             return ofn == mfn;
                         }
                     );
-                    if (iter == dbgr.Dlls.cend())
+                    if (inProcessDll == dbgr.Dlls.cend())
                     {
                         spdlog::info("::Hook \"{0}\" target module \"{1}\" not found, skip.", 
                             hook.FunctionName,
@@ -47,25 +50,12 @@ namespace Injector
                         ); continue;
                     }
 
-                    hook.ModuleBase = iter->first;
-                    placement       = reinterpret_cast<Address>(reinterpret_cast<DWORD>(placement) + reinterpret_cast<DWORD>(hook.ModuleBase));
-                    checksum        = iter->second.Checksum;
+                    hook.ModuleBase = inProcessDll->first;
+                    checksum = inProcessDll->second.Checksum;
                 }
 
-                if (hook.ModuleChecksum == 0 || checksum == hook.ModuleChecksum)
-                {
-                    if (!hook.ModuleName.empty())
-                        spdlog::info("::[0x{2:x}:0x{3:x} = 0x{4:x}] - on \"{1}\" placed hook \"{0}\".",
-                            hook.FunctionName, hook.ModuleName,
-                            (uint32_t) hook.ModuleBase, (uint32_t) hook.Placement, (uint32_t) placement
-                        );
-                    else
-                        spdlog::info("::[0x{2:x}:0x{3:x} = 0x{4:x}] - on executable placed hook \"{0}\".",
-                            hook.FunctionName, hook.ModuleName,
-                            (uint32_t) hook.ModuleBase, (uint32_t) hook.Placement, (uint32_t) placement
-                        );
-                }
-                else
+                bool checksumIsOk = hook.ModuleChecksum == 0 || checksum == hook.ModuleChecksum;
+                if (!checksumIsOk)
                 {
                     spdlog::info("::Hook \"{0}\": module checksum [0x{1:x}] and required [0x{2:x}] are different, skip.",
                         hook.FunctionName, checksum, hook.ModuleChecksum
@@ -73,14 +63,52 @@ namespace Injector
                     continue;
                 }
 
-                auto pocketIterator = Pockets.find(placement);
-                if(pocketIterator == Pockets.end())
-                    pocketIterator = Pockets.emplace(placement, HookPocket()).first;
+                placement = reinterpret_cast<Address>(
+                    reinterpret_cast<DWORD>(placement) + reinterpret_cast<DWORD>(/*isInExecutable ? 0 : */hook.ModuleBase)
+                );
 
-                HookPocket& pocket = pocketIterator->second;
-                pocket.Hooks.push_back(&hook);
-                pocket.OverriddenCount = 
-                    hook.Size > pocket.OverriddenCount ? hook.Size : pocket.OverriddenCount;
+                string logAddition, logAddition2;
+                switch (hook.Type)
+                {
+                case(HookType::Generic):
+                case(HookType::Extended):
+                    spdlog::info("::[0x{2:x}:0x{3:x} = 0x{4:x}] - on \"{1}\" placed hook \"{0}\".",
+                        hook.FunctionName, hookModuleName,
+                        (uint32_t)hook.ModuleBase, (uint32_t)hook.Placement, (uint32_t)placement
+                    );
+
+                    auto pocketIterator = Pockets.find(placement);
+                    if (pocketIterator == Pockets.end())
+                        pocketIterator = Pockets.emplace(placement, HookPocket()).first;
+
+                    HookPocket& pocket = pocketIterator->second;
+                    pocket.Hooks.push_back(&hook);
+                    pocket.OverriddenCount =
+                        hook.Size > pocket.OverriddenCount ? hook.Size : pocket.OverriddenCount;
+                    break;
+                case(HookType::FacadeByName):
+                    logAddition = "::" + hook.PlacementFunction;
+                case(HookType::FacadeAtAddress):
+                    auto facadeIterator = Facades.find(placement);
+                    if (facadeIterator != Facades.end())
+                    {
+                        logAddition2 = " - LAST REDEFINE WILL BE CHOISEN!";
+                    }
+                    else facadeIterator = Facades.emplace(placement, Facade()).first;
+
+                    spdlog::info("::[0x{2:x}:0x{3:x} = 0x{4:x}] - for {1}{5} redefine \"{0}\"{6}.",
+                        hook.FunctionName, hookModuleName,
+                        (uint32_t)hook.ModuleBase, (uint32_t)hook.Placement, (uint32_t)placement,
+                        logAddition, logAddition2
+                    );
+
+                    facadeIterator->second.Redefine = &hook;
+                    break;
+                default:
+                    spdlog::warn("::WTF UKNOWN HOOK!? MUST NEVER HAPPEN.");
+                    break;
+                }
+
             }
         }
 
@@ -107,9 +135,9 @@ namespace Injector
             programSize += JumpCodeSize;
 
             if (overridenCount < 5)
-                spdlog::trace("::[0x{0:x}] {1:d} fuctions, {2:d} overriden bytes (fixed from {3:d})", (uint32_t)pair.first, pair.second.Hooks.size(), pair.second.OverriddenCount, overridenCount);
+                spdlog::trace("::[0x{0:x}] {1:d} functions, {2:d} overriden bytes (fixed from {3:d})", (uint32_t)pair.first, pair.second.Hooks.size(), pair.second.OverriddenCount, overridenCount);
             else
-                spdlog::trace("::[0x{0:x}] {1:d} fuctions, {2:d} overriden bytes", (uint32_t)pair.first, pair.second.Hooks.size(), pair.second.OverriddenCount);
+                spdlog::trace("::[0x{0:x}] {1:d} functions, {2:d} overriden bytes", (uint32_t)pair.first, pair.second.Hooks.size(), pair.second.OverriddenCount);
         }
 
         NextInstructionsVmh = &Memory.Allocate(sizeof(Address) * Pockets.size());
@@ -224,6 +252,21 @@ namespace Injector
             offset += jumpBackSize;
             
             refNextInstruction++;
+        }
+
+        spdlog::info("Redefines:");
+        for (auto& redefine : Facades)
+        {
+            auto hook = redefine.second.Redefine;
+            auto placement = redefine.first;
+            Address const jumpBase = reinterpret_cast<BYTE*>(placement) + JumpR32lInstructionLength;
+            Address const jumpTo = hook->Function;
+
+            redefine.second.FacadeCallerBlockCode.Offset = relative_offset(jumpBase, jumpTo);
+            dbgr.Memory.Write(placement, &redefine.second.FacadeCallerBlockCode, JumpCodeSize);
+            spdlog::info("::0x{0:x} --> 0x{1:x} ({2})", 
+                placement, jumpTo, hook->FunctionName
+            );
         }
     }
     HookInjector::~HookInjector()
