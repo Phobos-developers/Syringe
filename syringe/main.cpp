@@ -113,7 +113,67 @@ int ParseModules(
     }
     for (auto& mdl : notAccepted)
         modules.remove_if([&](Module& a) -> bool { return a.FileName == mdl->FileName; });
+    
+    for (auto& mdl : modules)
+    {
+        spdlog::info("::\"{0}\" - checking for redefines", mdl.FileName);
+        for (auto& hook : mdl.Hooks)
+        {
+            bool isInExecutable = hook.ModuleName.empty();
+            auto hookModuleName = isInExecutable ? "executable" : "\"" + hook.ModuleName + "\"";
+            if (hook.Type == HookType::FacadeByName)
+            {
+                auto localDll = isInExecutable ? modules.cbegin() : std::find_if(modules.cbegin(), modules.cend(),
+                    [&hook](const Module& m) -> bool
+                    {
+                        auto ofnp = std::filesystem::path(m.FVI.Loaded ? m.FVI.OriginalFilename : m.FileName);
+                        auto ofn = ofnp.filename(); // .stem(); no extension
+                        auto mfnp = std::filesystem::path(hook.ModuleName);
+                        auto mfn = mfnp.filename(); //.stem();
+                        return ofn == mfn;
+                    }
+                );
+                if (localDll == modules.cend())
+                {
+                    spdlog::warn("::::Redefine {0} for {1}::{2} can not be resolved - target module not found in LOCAL injector list.",
+                        hook.FunctionName, hookModuleName, hook.PlacementFunction
+                    );
+                    break;
+                }
 
+                hook.Placement = GetProcAddress(localDll->get_handle(), hook.PlacementFunction.c_str());
+                if (!hook.Placement)
+                {
+                    spdlog::warn("::::Redefine {0} for {1}::{2} can not be resolved - target function not defined in target module.",
+                        hook.FunctionName, hookModuleName, hook.PlacementFunction
+                    );
+                    break;
+                }
+                spdlog::info("::::Redefine {0} for {1}::{2} = 0x{3:x}.",
+                    hook.FunctionName, hookModuleName, hook.PlacementFunction, hook.Placement
+                );
+            }
+            else if (hook.Type != HookType::FacadeAtAddress)
+                continue;
+
+            for (auto& m : modules)
+            {
+                for (auto& h : m.Hooks)
+                {
+                    auto isRedefine = hook.Type == HookType::FacadeByName || hook.Type == HookType::FacadeAtAddress;
+                    if (!isRedefine)
+                        continue;
+                    if (hook.Placement != h.Placement)
+                        continue;
+                    auto hModuleName = h.ModuleName.empty() ? "executable" : "\"" + h.ModuleName + "\"";
+                    spdlog::warn("::::Redefine conflict between ({0} for {1}::0x{2:x}) and ({3} for {4}::0x{5:x}).",
+                        hook.FunctionName, hookModuleName, hook.Placement,
+                        h.FunctionName, hModuleName, h.Placement
+                    );
+                }
+            }
+        }
+    }
     return EXIT_SUCCESS;
 }
 
@@ -128,6 +188,7 @@ int Run(std::string_view const arguments)
     spdlog::trace("Command line: '{}'", arguments);
 
     string       executableFile;
+    // UPD: the first entry - executable view as module
     list<Module> modules; 
     bool         forceExecutableValidation = false;
     bool         processWithEmptyModules   = true;
@@ -171,9 +232,10 @@ int Run(std::string_view const arguments)
         {
             spdlog::info("Modules to inject was directly specified:");
 
-            modules.resize(moduleCount);
-
+            modules.resize(moduleCount + 1);
             moduleCount = 0;
+
+            std::next(modules.begin(), moduleCount++)->FileName = executableFile;           
             for (size_t i = 0; i < map->Count(); i++)
             {
                 auto    arg = map->At(i);
@@ -181,14 +243,14 @@ int Run(std::string_view const arguments)
                     continue;
 
                 auto fn = arg->Parameters[0];
-                std::next(modules.begin(), moduleCount)->FileName = fn;
-                moduleCount++;
+                std::next(modules.begin(), moduleCount++)->FileName = fn;
             }
         }
         else
         {
             spdlog::info("Modules to inject not specified, scan directory (\"{0}\"):", std::filesystem::current_path().string());
 
+            modules.emplace_back().FileName = executableFile;
             for (const auto& e : std::filesystem::directory_iterator(std::filesystem::current_path()))
             {
                 if (!e.is_regular_file())

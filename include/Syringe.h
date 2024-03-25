@@ -246,8 +246,9 @@ struct SyringeHandshakeInfo
 */
 namespace SyringeData 
 {
-    namespace    Hooks    {};
-    namespace    Hosts        {};
+    namespace    Hooks {};
+    namespace    Hosts {};
+    namespace    FunctionReplacements {};
 };
 
 #define declhost(exename, checksum) \
@@ -258,6 +259,12 @@ namespace SyringeData { namespace Hooks { __declspec(allocate(".syhks00")) HookD
 
 #define decldllhook(prefix, name, checksum, hook, funcname, size) \
 namespace SyringeData { namespace Hooks { __declspec(allocate(".syhks01")) ExtendedHookDecl _hk__ ## prefix ## hook ## funcname = { ## hook, ## size, #funcname, #name, ## checksum }; }; };
+
+#define declarefunctionreplacement0(prefix, name, checksum, targetname, funcname) \
+namespace SyringeData { namespace FunctionReplacements { __declspec(allocate(".syfrh00")) FunctionReplacement0Decl _fr0__ ## prefix ## hook ## funcname = { #targetname, #funcname, #name, ## checksum }; }; };
+
+#define declarefunctionreplacement1(prefix, name, checksum, targetaddr, funcname) \
+namespace SyringeData { namespace FunctionReplacements { __declspec(allocate(".syfrh01")) FunctionReplacement1Decl _fr1__ ## prefix ## hook ## funcname = { #targetaddr, #funcname, #name, ## checksum }; }; };
 
 // Defines a hook at the specified address with the specified name and saving the specified amount of instruction bytes to be restored if return to the same address is used. In addition to the injgen-declaration, also includes the function opening.
 #define DEFINE_HOOK(hook, funcname, size) \
@@ -276,9 +283,31 @@ declhook(hook, funcname, size)
 #define DEFINE_HOOK_EX(hook, funcname, size, prefix, name, checksum) \
 decldllhook(prefix, name, checksum, hook, funcname, size) \
 EXPORT_FUNC(funcname)
-// Does the same as DEFINE_HOOK but no function opening, use for injgen-declaration when repeating the same hook at multiple addresses.
-// CAUTION: funcname must be the same as in DEFINE_HOOK.
+// Does the same as DEFINE_HOOK_EX but no function opening, use for injgen-declaration when repeating the same hook at multiple addresses.
+// CAUTION: funcname must be the same as in DEFINE_HOOK_EX.
 #define DEFINE_HOOK_EX_AGAIN(hook, funcname, size, prefix, name, checksum) \
 decldllhook(prefix, name, checksum, hook, funcname, size)
+
+// this is only static declaration like DEFINE_HOOK_AGAIN & DEFINE_HOOK_AGAIN_EX and can be in any place of program
+// originalname is the function name which will be decorated
+#define REDEFINE_FUNCTION(originalname, funcname, prefix, name, checksum) \
+declarefunctionreplacement0(prefix, name, checksum, originalname, funcname)
+
+// this is contains function delcaration too
+// originalname is the function name which will be decorated
+#define REDEFINE_FUNCTION(originalname, funcname, prefix, name, checksum, rettype, ...) \
+declarefunctionreplacement0(prefix, name, checksum, originalname, funcname) \
+rettype funcname(__VA_ARGS__)
+
+// this is only static declaration like DEFINE_HOOK_AGAIN & DEFINE_HOOK_AGAIN_EX and can be in any place of program
+// targetaddr is address which will be decorated
+#define REDEFINE_AT(targetaddr, funcname, prefix, name, checksum) \
+declarefunctionreplacement1(prefix, name, checksum, targetaddr, funcname)
+
+// this is contains function delcaration too
+// targetaddr is address which will be decorated
+#define REDEFINE_AT(targetaddr, funcname, prefix, name, checksum) \
+declarefunctionreplacement1(prefix, name, checksum, targetaddr, funcname, rettype, ...) \
+rettype funcname(__VA_ARGS__)
 
 #endif
