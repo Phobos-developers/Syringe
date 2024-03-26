@@ -66,6 +66,58 @@ Extended version of generic hook. It is possible place it againts specific DLL a
     CRC32 value. Hook will be placed againts module with specific checksum. Can be used for versioning.
     ***`0` is special value which mean any module version.***
 
+### Function redefine (deco hook)
+
+Function redefine or deco hook it is a hook that used to reimplement original function. Injector has two variations of such hook.
+
+**If several function redefinitions present, only one will be selected. And selected one will first declared. It depends on modules (dlls) order.**
+
+#### By Name
+
+***USE THIS VERSION ONLY IF TARGET FUNCTION IS EXPORTED.***
+
+**Macro:** `REDEFINE_FUNCTION` (two overloads - with function declaration and without).
+**Parameters:**
+
+1. **Original function name**
+    The function to redefine from target module.
+    Function must be exported. Injector automatically will seek address of this function and use it.
+2. **Function name**
+    Hook related functions.
+3. **Prefix**
+    Just internal identifier to split up hook definitions with same name.
+4. **Name**
+    Name of target module. If File version info (FVI) present then name of it will be used. If FVI is not present then filename will be used.
+    ***`nullptr` is special value which target module is current executable.***
+5. **Checksum**
+    CRC32 value. Hook will be placed againts module with specific checksum. Can be used for versioning.
+    ***`0` is special value which mean any module version.***
+6. **Return type**
+    Return type of function to declare it in-place.
+7. **...**
+    Variadic arguments of function parameters to declare it in-place.
+
+#### By Address
+
+**Macro:** `REDEFINE_AT` (two overloads - with function declaration and without).
+
+1. **Target address**
+    The first instruction address of target function.
+2. **Function name**
+    Hook related functions.
+3. **Prefix**
+    Just internal identifier to split up hook definitions with same name.
+4. **Name**
+    Name of target module. If File version info (FVI) present then name of it will be used. If FVI is not present then filename will be used.
+    ***`nullptr` is special value which target module is current executable.***
+5. **Checksum**
+    CRC32 value. Hook will be placed againts module with specific checksum. Can be used for versioning.
+    ***`0` is special value which mean any module version.***
+6. **Return type**
+    Return type of function to declare it in-place.
+7. **...**
+    Variadic arguments of function parameters to declare it in-place.
+
 ## Hosts
 
 Original syringe has mechanic for hosts target. It is a list of module names with specific checksums. Syringe and injector check it for each injectable dll.
