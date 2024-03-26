@@ -30,7 +30,7 @@ namespace Injector
 
         HookFunction Function       { nullptr };
         Address      Placement      { nullptr };
-        std::string  PlacementFunction { nullptr };
+        std::string  PlacementFunction = "";
         Address      ModuleBase     { nullptr };
         std::string  ModuleName     = "";
         unsigned int ModuleChecksum = 0;
