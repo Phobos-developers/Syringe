@@ -95,17 +95,19 @@ namespace Injector
                         auto facadeIterator = Facades.find(placement);
                         if (facadeIterator != Facades.end())
                         {
-                            logAddition2 = " - LAST REDEFINE WILL BE CHOISEN!";
+                            logAddition2 = " - FIRST REDEFINE WILL BE CHOISEN!";
                         }
-                        else facadeIterator = Facades.emplace(placement, Facade()).first;
+                        else
+                        {
+                            facadeIterator = Facades.emplace(placement, Facade()).first;
+                            facadeIterator->second.Redefine = &hook;
+                        }
 
                         spdlog::info("::[0x{2:x}:0x{3:x} = 0x{4:x}] - for {1}{5} redefine \"{0}\"{6}.",
                             hook.FunctionName, hookModuleName,
                             (uint32_t)hook.ModuleBase, (uint32_t)hook.Placement, (uint32_t)placement,
                             logAddition, logAddition2
                         );
-
-                        facadeIterator->second.Redefine = &hook;
                     } break;
                     default:
                     {
