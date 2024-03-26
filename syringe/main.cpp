@@ -1,4 +1,4 @@
-﻿#include <iostream>
+#include <iostream>
 #include <string>
 #include <string_view>
 
@@ -16,11 +16,12 @@ using namespace PECOFF;
 int ParseModule(
     Module& mdl, 
     bool forceExecutableValidation,
-    bool stopIfModuleInvalid)
+    bool stopIfModuleInvalid,
+    bool strictFVI)
 {
     try
     {
-        mdl.parse(mdl.FileName);
+        mdl.parse(mdl.FileName, strictFVI);
         spdlog::info("::\"{0}\": {1} hooks & {2} hosts found, checksum: 0x{3:x} ({3:d})", mdl.FileName, mdl.Hooks.size(), mdl.Hosts.size(), mdl.Checksum);
         for (auto& host : mdl.Hosts)
             spdlog::trace(":::: 0x{1:x}, \"{0}\"", host.FileName, host.Checksum);
@@ -88,7 +89,8 @@ int ParseModules(
     list<Module>& modules, 
     bool forceExecutableValidation,
     bool processWithEmptyModules,
-    bool stopIfModuleInvalid)
+    bool stopIfModuleInvalid,
+    bool strictFVI)
 {
     if (modules.empty() && !processWithEmptyModules)
     {
@@ -103,7 +105,7 @@ int ParseModules(
     list<Module*> notAccepted;
     for (auto& mdl : modules)
     {
-        auto r = ParseModule(mdl, forceExecutableValidation, stopIfModuleInvalid);
+        auto r = ParseModule(mdl, forceExecutableValidation, stopIfModuleInvalid, strictFVI);
         if (r != EXIT_SUCCESS)
         {
             notAccepted.push_back(&mdl);
@@ -185,6 +187,7 @@ int Run(std::string_view const arguments)
     spdlog::set_level(spdlog::level::trace);
     spdlog::set_default_logger(file_logger);
 
+    spdlog::trace("Working directory: {0}", std::filesystem::current_path().string());
     spdlog::trace("Command line: '{}'", arguments);
 
     string       executableFile;
@@ -193,114 +196,125 @@ int Run(std::string_view const arguments)
     bool         forceExecutableValidation = false;
     bool         processWithEmptyModules   = true;
     bool         stopIfModuleInvalid       = false;
+    bool         strictFVI = false;
 
     unsigned int executableChecksum        = 0;
 
     try
     {
-        ArgumentMap* map = ParseArguments(const_cast<TCHAR*>(arguments.data()));
-        if (!map->HasFreeParameters())
+        try
         {
-            spdlog::error("Executable path not specified. It MUST be first parameter of command line.");
+            ArgumentMap* map = ParseArguments(const_cast<TCHAR*>(arguments.data()));
+            if (!map->HasFreeParameters())
+            {
+                spdlog::error("Executable path not specified. It MUST be first parameter of command line.");
+                MessageBoxA(
+                    nullptr,
+                    "First argument must be executable file path.",
+                    "Invalid configuration.",
+                    MB_OK);
+                return EXIT_FAILURE;
+            }
+            executableFile = map->FreeParameters()->Parameters[0];
+
+            executableChecksum = CRC32::compute_stream(file_open_binary(executableFile));
+            spdlog::info("Executable \"{0}\", checksum: 0x{1:x} ({1:d})", executableFile, executableChecksum);
+
+            size_t moduleCount = 0;
+            for (size_t i = 0; i < map->Count(); i++)
+            {
+                auto    arg = map->At(i);
+                if ((string)arg->Prefix == (string)"-forceExecutableValidation")
+                    forceExecutableValidation = true;
+                else if ((string)arg->Prefix == (string)"-requireInjectableModules")
+                    processWithEmptyModules = false;
+                else if ((string)arg->Prefix == (string)"-requireValidConfiguration")
+                    stopIfModuleInvalid = true;
+                else if ((string)arg->Prefix == (string)"-dll")
+                    moduleCount++;
+                else if ((string)arg->Prefix == (string)"-strictFVI")
+                    strictFVI = true;
+            }
+
+            if (moduleCount > 0)
+            {
+                spdlog::info("Modules to inject was directly specified:");
+
+                modules.resize(moduleCount + 1);
+                moduleCount = 0;
+
+                std::next(modules.begin(), moduleCount++)->FileName = executableFile;
+                for (size_t i = 0; i < map->Count(); i++)
+                {
+                    auto    arg = map->At(i);
+                    if ((string)arg->Prefix != (string)"-dll")
+                        continue;
+
+                    auto fn = arg->Parameters[0];
+                    std::next(modules.begin(), moduleCount++)->FileName = fn;
+                }
+            }
+            else
+            {
+                spdlog::info("Modules to inject not specified, scan directory (\"{0}\"):", std::filesystem::current_path().string());
+
+                modules.emplace_back().FileName = executableFile;
+                for (const auto& e : std::filesystem::directory_iterator(std::filesystem::current_path()))
+                {
+                    if (!e.is_regular_file())
+                        continue;
+                    if (e.path().has_extension() && e.path().extension().string() == (string)".dll")
+                    {
+                        auto& mdl = modules.emplace_back();
+                        mdl.FileName = e.path().filename().string();
+                    }
+                }
+            }
+
+            for (auto& mdl : modules)
+                spdlog::info("::\"{0}\"", mdl.FileName);
+
+            spdlog::info("Parse modules for hosts & hooks");
+            auto r = ParseModules(modules, forceExecutableValidation, processWithEmptyModules, stopIfModuleInvalid, strictFVI);
+            if (r != EXIT_SUCCESS)
+                return r;
+        }
+        catch (ArgumentMap::StringIsEmptyException& ex)
+        {
             MessageBoxA(
                 nullptr,
-                "First argument must be executable file path.",
+                "Couldn't parse arguments: string is empty.",
                 "Invalid configuration.",
                 MB_OK);
             return EXIT_FAILURE;
         }
-        executableFile = map->FreeParameters()->Parameters[0];
 
-        executableChecksum = CRC32::compute_stream(file_open_binary(executableFile));
-        spdlog::info("Executable \"{0}\", checksum: 0x{1:x} ({1:d})", executableFile, executableChecksum);
-
-        size_t moduleCount = 0;
-        for (size_t i = 0; i < map->Count(); i++)
+        PortableExecutable peExecutable{ file_open_binary(executableFile) };
+        Kernel32 kernel{ peExecutable };
+        if (!kernel.is_injectable())
         {
-            auto    arg    = map->At(i);
-            if ((string) arg->Prefix == (string) "-forceExecutableValidation")
-                forceExecutableValidation = true;
-            else if ((string) arg->Prefix == (string)"-requireInjectableModules")
-                processWithEmptyModules = false;
-            else if ((string) arg->Prefix == (string)"-requireValidConfiguration")
-                stopIfModuleInvalid = true;
-            else if ((string) arg->Prefix == (string) "-dll")
-                moduleCount++;
+            MessageBoxA(
+                nullptr,
+                "Import section does not contains KERNEL32.DLL with LOADLIBRARYA, GETPROCADDRESS, FREELIBRARY functions.",
+                "Not injectable.",
+                MB_OK);
+            return EXIT_FAILURE;
         }
 
-        if (moduleCount > 0)
-        {
-            spdlog::info("Modules to inject was directly specified:");
-
-            modules.resize(moduleCount + 1);
-            moduleCount = 0;
-
-            std::next(modules.begin(), moduleCount++)->FileName = executableFile;           
-            for (size_t i = 0; i < map->Count(); i++)
-            {
-                auto    arg = map->At(i);
-                if ((string) arg->Prefix != (string) "-dll")
-                    continue;
-
-                auto fn = arg->Parameters[0];
-                std::next(modules.begin(), moduleCount++)->FileName = fn;
-            }
-        }
-        else
-        {
-            spdlog::info("Modules to inject not specified, scan directory (\"{0}\"):", std::filesystem::current_path().string());
-
-            modules.emplace_back().FileName = executableFile;
-            for (const auto& e : std::filesystem::directory_iterator(std::filesystem::current_path()))
-            {
-                if (!e.is_regular_file())
-                    continue;
-                if (e.path().has_extension() && e.path().extension().string() == (string)".dll")
-                {
-                    auto& mdl    = modules.emplace_back();
-                    mdl.FileName = e.path().filename().string();
-                }
-            }
-        }        
-
-        for(auto& mdl : modules)
-            spdlog::info("::\"{0}\"", mdl.FileName);
-
-        spdlog::info("Parse modules for hosts & hooks");
-        auto r = ParseModules(modules, forceExecutableValidation, processWithEmptyModules, stopIfModuleInvalid);
-        if (r != EXIT_SUCCESS)
-            return r;
+        spdlog::info("Prepare debugger & process...");
+        Debugger::DebugLoop debugger{ executableFile, arguments, /* We do not want to lost all applies after debugger detach (by other, real debugger, attaching) */ false };
+        spdlog::info("Prepare configurator...");
+        Configurator configurator{ peExecutable, debugger, /*kernel,*/ modules, arguments, executableFile };
+        spdlog::info("Run debugger...");
+        debugger.Run();
+        spdlog::info("Injector & debugger done.");
+        return EXIT_SUCCESS;
     }
-    catch (ArgumentMap::StringIsEmptyException& ex)
+    catch (const std::exception& e)
     {
-        MessageBoxA(
-            nullptr,
-            "Couldn't parse arguments: string is empty.",
-            "Invalid configuration.",
-            MB_OK);
-        return EXIT_FAILURE;
-    }    
-
-    PortableExecutable peExecutable { file_open_binary(executableFile) };
-    Kernel32 kernel { peExecutable };
-    if(!kernel.is_injectable())
-    {
-        MessageBoxA(
-            nullptr, 
-            "Import section does not contains KERNEL32.DLL with LOADLIBRARYA, GETPROCADDRESS, FREELIBRARY functions.", 
-            "Not injectable.",
-            MB_OK);        
+        spdlog::critical("FATAL:\n{0}", e.what());
         return EXIT_FAILURE;
     }
-
-    spdlog::info("Prepare debugger & process...");
-    Debugger::DebugLoop debugger { executableFile, arguments, /* We do not want to lost all applies after debugger detach (by other, real debugger, attaching) */ false };
-    spdlog::info("Prepare configurator...");
-    Configurator configurator { peExecutable, debugger, /*kernel,*/ modules, arguments, executableFile};
-    spdlog::info("Run debugger...");
-    debugger.Run();
-    spdlog::info("Injector & debugger done.");
-    return EXIT_SUCCESS;
 }
 
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int nCmdShow)

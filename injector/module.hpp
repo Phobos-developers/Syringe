@@ -78,11 +78,11 @@ namespace Injector
         PECOFF::PortableExecutable const& pe() const { return _pe; }
 
         Module() = default;
-        Module(string_view const& fileName);
-        Module(string_view const& fileName, string_view const& injFileName);
+        Module(string_view const& fileName, bool strictFVI = false);
+        Module(string_view const& fileName, string_view const& injFileName, bool strictFVI = false);
 
-        void parse(string_view const& fileName);
-        void parse(string_view const& fileName, string_view const& injFileName);
+        void parse(string_view const& fileName, bool strictFVI = false);
+        void parse(string_view const& fileName, string_view const& injFileName, bool strictFVI = false);
 
         bool is_host_supported(string_view const& executableFile, unsigned int checksum = 0);
         bool is_executable_supported(string_view const& executableFile, unsigned int checksum = 0);

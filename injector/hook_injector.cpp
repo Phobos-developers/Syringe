@@ -67,48 +67,52 @@ namespace Injector
                     reinterpret_cast<DWORD>(placement) + reinterpret_cast<DWORD>(/*isInExecutable ? 0 : */hook.ModuleBase)
                 );
 
-                string logAddition, logAddition2;
+                string logAddition, logAddition2;                
                 switch (hook.Type)
                 {
-                case(HookType::Generic):
-                case(HookType::Extended):
-                    spdlog::info("::[0x{2:x}:0x{3:x} = 0x{4:x}] - on \"{1}\" placed hook \"{0}\".",
-                        hook.FunctionName, hookModuleName,
-                        (uint32_t)hook.ModuleBase, (uint32_t)hook.Placement, (uint32_t)placement
-                    );
-
-                    auto pocketIterator = Pockets.find(placement);
-                    if (pocketIterator == Pockets.end())
-                        pocketIterator = Pockets.emplace(placement, HookPocket()).first;
-
-                    HookPocket& pocket = pocketIterator->second;
-                    pocket.Hooks.push_back(&hook);
-                    pocket.OverriddenCount =
-                        hook.Size > pocket.OverriddenCount ? hook.Size : pocket.OverriddenCount;
-                    break;
-                case(HookType::FacadeByName):
-                    logAddition = "::" + hook.PlacementFunction;
-                case(HookType::FacadeAtAddress):
-                    auto facadeIterator = Facades.find(placement);
-                    if (facadeIterator != Facades.end())
+                    case(HookType::Generic): {}
+                    case(HookType::Extended):
                     {
-                        logAddition2 = " - LAST REDEFINE WILL BE CHOISEN!";
-                    }
-                    else facadeIterator = Facades.emplace(placement, Facade()).first;
+                        spdlog::info("::[0x{2:x}:0x{3:x} = 0x{4:x}] - on \"{1}\" placed hook \"{0}\".",
+                            hook.FunctionName, hookModuleName,
+                            (uint32_t)hook.ModuleBase, (uint32_t)hook.Placement, (uint32_t)placement
+                        );
 
-                    spdlog::info("::[0x{2:x}:0x{3:x} = 0x{4:x}] - for {1}{5} redefine \"{0}\"{6}.",
-                        hook.FunctionName, hookModuleName,
-                        (uint32_t)hook.ModuleBase, (uint32_t)hook.Placement, (uint32_t)placement,
-                        logAddition, logAddition2
-                    );
+                        auto pocketIterator = Pockets.find(placement);
+                        if (pocketIterator == Pockets.end())
+                            pocketIterator = Pockets.emplace(placement, HookPocket()).first;
 
-                    facadeIterator->second.Redefine = &hook;
-                    break;
-                default:
-                    spdlog::warn("::WTF UKNOWN HOOK!? MUST NEVER HAPPEN.");
-                    break;
+                        HookPocket& pocket = pocketIterator->second;
+                        pocket.Hooks.push_back(&hook);
+                        pocket.OverriddenCount =
+                            hook.Size > pocket.OverriddenCount ? hook.Size : pocket.OverriddenCount;
+                    } break;
+                    case(HookType::FacadeByName):
+                    { logAddition = "::" + hook.PlacementFunction; }
+                    case(HookType::FacadeAtAddress):
+                    {
+                        auto facadeIterator = Facades.find(placement);
+                        if (facadeIterator != Facades.end())
+                        {
+                            logAddition2 = " - FIRST REDEFINE WILL BE CHOISEN!";
+                        }
+                        else
+                        {
+                            facadeIterator = Facades.emplace(placement, Facade()).first;
+                            facadeIterator->second.Redefine = &hook;
+                        }
+
+                        spdlog::info("::[0x{2:x}:0x{3:x} = 0x{4:x}] - for {1}{5} redefine \"{0}\"{6}.",
+                            hook.FunctionName, hookModuleName,
+                            (uint32_t)hook.ModuleBase, (uint32_t)hook.Placement, (uint32_t)placement,
+                            logAddition, logAddition2
+                        );
+                    } break;
+                    default:
+                    {
+                        spdlog::warn("::WTF UKNOWN HOOK!? MUST NEVER HAPPEN.");
+                    } break;
                 }
-
             }
         }
 

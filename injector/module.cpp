@@ -97,7 +97,8 @@ namespace Injector
 
         auto const base = _pe.PEHeader.OptionalHeader.ImageBase;
 
-        auto& section = _pe.find_section(ExtendedHooksPESectionName);
+        auto& section = _pe.find_section(FunctionReplacementsByAddressPESectionName);
+
         auto const begin = section.PointerToRawData;
         auto const end = begin + section.SizeOfRawData;
 
@@ -134,8 +135,9 @@ namespace Injector
         size_t const declSize = sizeof(FunctionReplacement1Decl);
 
         auto const base = _pe.PEHeader.OptionalHeader.ImageBase;
+      
+        auto& section = _pe.find_section(FunctionReplacementsByNamePESectionName);
 
-        auto& section = _pe.find_section(ExtendedHooksPESectionName);
         auto const begin = section.PointerToRawData;
         auto const end = begin + section.SizeOfRawData;
 
@@ -189,11 +191,11 @@ namespace Injector
         }
     }
 
-    Module::Module(string_view const& fileName)
+    Module::Module(string_view const& fileName, bool strictFVI)
     {
-        parse(fileName);
+        parse(fileName, strictFVI);
     }
-    void Module::parse(string_view const& fileName)
+    void Module::parse(string_view const& fileName, bool strictFVI)
     {
         FileName        = fileName;
         _ifs            = file_open_binary(FileName);
@@ -208,7 +210,8 @@ namespace Injector
         try { FVI.Load(FileName); }
         catch (const Utilities::FileVersionInformation::fvi_load_error&)
         {
-            throw construct_error(file_read_error, "Unable to read FileVersionInformation");
+            if(strictFVI)
+                throw construct_error(file_read_error, "Unable to read FileVersionInformation");
         }
 
         try { parse_hosts();          } catch(const PE::section_not_found_error&) { };
@@ -217,11 +220,11 @@ namespace Injector
         try { parse_function_replacements_type0(); } catch(const PE::section_not_found_error&) { };
         try { parse_function_replacements_type1(); } catch(const PE::section_not_found_error&) { };
     }
-    Module::Module(string_view const& fileName, string_view const& injFileName)
+    Module::Module(string_view const& fileName, string_view const& injFileName, bool strictFVI)
     {
-        parse(fileName, injFileName);
+        parse(fileName, injFileName, strictFVI);
     }
-    void Module::parse(string_view const& fileName, string_view const& injFileName)
+    void Module::parse(string_view const& fileName, string_view const& injFileName, bool strictFVI)
     {
         FileName        = fileName;
         _ifs            = file_open_binary(FileName);
@@ -236,7 +239,8 @@ namespace Injector
         try { FVI.Load(FileName); }
         catch (const Utilities::FileVersionInformation::fvi_load_error&)
         {
-            throw construct_error(file_read_error, "Unable to read FileVersionInformation");
+            if (strictFVI)
+                throw construct_error(file_read_error, "Unable to read FileVersionInformation");
         }
 
         try { parse_inj_file(injFileName); } catch(const file_not_found_error&) { throw construct_error_args_no_msg(non_injectable_module_error, fileName, non_injectable_module_error::Type::MissingInj); };
