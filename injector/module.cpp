@@ -98,6 +98,7 @@ namespace Injector
         auto const base = _pe.PEHeader.OptionalHeader.ImageBase;
 
         auto& section = _pe.find_section(FunctionReplacementsByAddressPESectionName);
+
         auto const begin = section.PointerToRawData;
         auto const end = begin + section.SizeOfRawData;
 
@@ -134,8 +135,9 @@ namespace Injector
         size_t const declSize = sizeof(FunctionReplacement1Decl);
 
         auto const base = _pe.PEHeader.OptionalHeader.ImageBase;
-
+      
         auto& section = _pe.find_section(FunctionReplacementsByNamePESectionName);
+
         auto const begin = section.PointerToRawData;
         auto const end = begin + section.SizeOfRawData;
 
