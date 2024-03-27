@@ -290,7 +290,7 @@ decldllhook(prefix, name, checksum, hook, funcname, size)
 
 // this is only static declaration like DEFINE_HOOK_AGAIN & DEFINE_HOOK_AGAIN_EX and can be in any place of program
 // originalname is the function name which will be decorated
-#define REDEFINE_FUNCTION(originalname, funcname, prefix, name, checksum) \
+#define REDEFINE_FUNCTION_AGAIN(originalname, funcname, prefix, name, checksum) \
 declarefunctionreplacement0(prefix, name, checksum, originalname, funcname)
 
 // this is contains function delcaration too
@@ -301,7 +301,7 @@ rettype funcname(__VA_ARGS__)
 
 // this is only static declaration like DEFINE_HOOK_AGAIN & DEFINE_HOOK_AGAIN_EX and can be in any place of program
 // targetaddr is address which will be decorated
-#define REDEFINE_AT(targetaddr, funcname, prefix, name, checksum) \
+#define REDEFINE_AT_AGAIN(targetaddr, funcname, prefix, name, checksum) \
 declarefunctionreplacement1(prefix, name, checksum, targetaddr, funcname)
 
 // this is contains function delcaration too

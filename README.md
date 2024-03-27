@@ -71,7 +71,7 @@ Function redefine or deco hook it is a hook that used to reimplement original fu
 
 ***USE THIS VERSION ONLY IF TARGET FUNCTION IS EXPORTED.***
 
-**Macro:** `REDEFINE_FUNCTION` (two overloads - with function declaration and without).
+**Macro:** `REDEFINE_FUNCTION`& `REDEFINE_FUNCTION_AGAIN`.
 **Parameters:**
 
 1. **Original function name**
@@ -94,7 +94,7 @@ Function redefine or deco hook it is a hook that used to reimplement original fu
 
 #### By Address
 
-**Macro:** `REDEFINE_AT` (two overloads - with function declaration and without).
+**Macro:** `REDEFINE_AT`& `REDEFINE_AT_AGAIN`.
 
 1. **Target address**
     The first instruction address of target function.
