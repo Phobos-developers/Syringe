@@ -306,7 +306,7 @@ declarefunctionreplacement1(prefix, name, checksum, targetaddr, funcname)
 
 // this is contains function delcaration too
 // targetaddr is address which will be decorated
-#define REDEFINE_AT(targetaddr, funcname, prefix, name, checksum) \
+#define REDEFINE_AT(targetaddr, funcname, prefix, name, checksum, rettype, ...) \
 declarefunctionreplacement1(prefix, name, checksum, targetaddr, funcname, rettype, ...) \
 rettype funcname(__VA_ARGS__)
 
