@@ -1,7 +1,6 @@
 #ifndef INJECTOR_CONTEXT_HPP
 #define INJECTOR_CONTEXT_HPP
 
-#include <macro.hpp>
 #include <string>
 
 #define WIN32_LEAN_AND_MEAN
@@ -10,6 +9,16 @@
 
 namespace Injector
 {
+    template<typename T>
+    inline T& reference_cast(T* ptr) { return (T&)*ptr; /* reinterpret_cast<T&>(ptr); */ }
+
+    template<typename T>
+    inline T* offset_ptr(void* ptr, size_t offset = 0)
+    {
+        unsigned char* pointer = static_cast<unsigned char*>(ptr) + offset;
+        return reinterpret_cast<T*>(pointer);
+    }
+
     using std::string;
 
     /*!

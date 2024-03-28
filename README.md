@@ -25,6 +25,8 @@ Just use this command line argument: `-dll ${filenameOfDll}` as many as you need
 
 See defiitions and macroses at [`Include/Syringe.h`](Include/Syringe.h).
 
+**Recommendation: always use *extended hook* instead of *generic hook* (and do not use `nullptr` case for name for extended hooks) to prevent problems with dynamic module base when basic address is different. Also, it should help with ASLR (need testing).**
+
 ### Generic Hook
 
 Common original syringe hook. Can be placed only at executable and there is no any conditions for disable it.
@@ -34,8 +36,9 @@ Common original syringe hook. Can be placed only at executable and there is no a
 
 1. ***Address***
     The address where hook will be placed.
+    ***This is absolute address for hook placement: `AbsoluteAddress = ModuleBase + Offset`***.
 2. ***Function name***
-    Hook related functions.
+    Hook related function.
 3. ***Overriden bytes (of instrutions)***
     Count of bytes to override at hook placement. Minimal: 5 (injector fix any smaller value). If 'hook pocket' executes all functions and there is no jump out then instruction of this bytes will be executed before jump back.
 
@@ -48,8 +51,10 @@ Extended version of generic hook. It is possible place it againts specific DLL a
 
 1. ***Address***
     The address where hook will be placed.
+    ***This is relative address (offset) for hook placement: `AbsoluteAddress = ModuleBase + Offset`***.
+    ***If module specified as `nullptr` then absolute address placement present like generic hook.***
 2. ***Function name***
-    Hook related functions.
+    Hook related function.
 3. ***Overriden bytes (of instrutions)***
     Count of bytes to override at hook placement. Minimal: 5 (injector fix any smaller value). If 'hook pocket' executes all functions and there is no jump out then instruction of this bytes will be executed before jump back.
 4. **Prefix**
@@ -71,7 +76,7 @@ Function redefine or deco hook it is a hook that used to reimplement original fu
 
 ***USE THIS VERSION ONLY IF TARGET FUNCTION IS EXPORTED.***
 
-**Macro:** `REDEFINE_FUNCTION` (two overloads - with function declaration and without).
+**Macro:** `REDEFINE_FUNCTION`& `REDEFINE_FUNCTION_AGAIN`.
 **Parameters:**
 
 1. **Original function name**
@@ -94,7 +99,7 @@ Function redefine or deco hook it is a hook that used to reimplement original fu
 
 #### By Address
 
-**Macro:** `REDEFINE_AT` (two overloads - with function declaration and without).
+**Macro:** `REDEFINE_AT`& `REDEFINE_AT_AGAIN`.
 
 1. **Target address**
     The first instruction address of target function.
