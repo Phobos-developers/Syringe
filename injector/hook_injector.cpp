@@ -66,9 +66,8 @@ namespace Injector
                 placement = reinterpret_cast<Address>(
                     reinterpret_cast<DWORD>(placement) + reinterpret_cast<DWORD>(/*isInExecutable ? 0 : */hook.ModuleBase)
                 );
-
-                string logAddition, logAddition2;
                 
+                string logAddition, logAddition2;                
                 switch (hook.Type)
                 {
                     case(HookType::Generic): {}
