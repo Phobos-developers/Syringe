@@ -83,7 +83,7 @@ Function redefine or deco hook it is a hook that used to reimplement original fu
     The function to redefine from target module.
     Function must be exported. Injector automatically will seek address of this function and use it.
 2. **Function name**
-    Hook related functions.
+    Hook related function.
 3. **Prefix**
     Just internal identifier to split up hook definitions with same name.
 4. **Name**
@@ -103,8 +103,9 @@ Function redefine or deco hook it is a hook that used to reimplement original fu
 
 1. **Target address**
     The first instruction address of target function.
+    The same as `extended hook`.
 2. **Function name**
-    Hook related functions.
+    Hook related function.
 3. **Prefix**
     Just internal identifier to split up hook definitions with same name.
 4. **Name**
