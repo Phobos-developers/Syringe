@@ -264,7 +264,7 @@ namespace SyringeData { namespace Hooks { __declspec(allocate(".syhks01")) Exten
 namespace SyringeData { namespace FunctionReplacements { __declspec(allocate(".syfrh00")) FunctionReplacement0Decl _fr0__ ## prefix ## hook ## funcname = { #targetname, #funcname, #name, ## checksum }; }; };
 
 #define declarefunctionreplacement1(prefix, name, checksum, targetaddr, funcname) \
-namespace SyringeData { namespace FunctionReplacements { __declspec(allocate(".syfrh01")) FunctionReplacement1Decl _fr1__ ## prefix ## hook ## funcname = { #targetaddr, #funcname, #name, ## checksum }; }; };
+namespace SyringeData { namespace FunctionReplacements { __declspec(allocate(".syfrh01")) FunctionReplacement1Decl _fr1__ ## prefix ## hook ## funcname = { targetaddr, #funcname, #name, ## checksum }; }; };
 
 // Defines a hook at the specified address with the specified name and saving the specified amount of instruction bytes to be restored if return to the same address is used. In addition to the injgen-declaration, also includes the function opening.
 #define DEFINE_HOOK(hook, funcname, size) \
