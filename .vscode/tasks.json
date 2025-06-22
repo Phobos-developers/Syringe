@@ -1,0 +1,78 @@
+{
+  // See https://go.microsoft.com/fwlink/?LinkId=733558
+  // for the documentation about the tasks.json format
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build",
+      "type": "process",
+      "command": [],
+      "windows": {
+        "command": "scripts/build.bat",
+        "args": [
+          "${input:buildType}"
+        ]
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "Cleanup build folders",
+      "type": "process",
+      "command": [],
+      "windows": {
+        "command": "scripts/clean.bat"
+      },
+      "group": "none",
+      "problemMatcher": []
+    },
+    {
+      "label": "Check editorconfig",
+      "type": "process",
+      "command": [],
+      "windows": {
+        "command": "scripts/editorconfig-checker.bat"
+      },
+      "group": "none",
+      "problemMatcher": []
+    // },
+    // {
+    //   "label": "Setup VSCode C++ extension initial configuration",
+    //   "type": "process",
+    //   "command": [],
+    //   "windows": {
+    //     "command": "scripts/configure_vscode_cpp.bat"
+    //   },
+    //   "group": "none",
+    //   "problemMatcher": [],
+    //   "runOptions": {
+    //     "runOn": "folderOpen"
+    //   },
+    //   "presentation": {
+    //     "echo": false,
+    //     "reveal": "never",
+    //     "panel": "shared",
+    //     "showReuseMessage": false
+    //   }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "buildType",
+      "type": "pickString",
+      "options": [
+        {
+          "value": "Debug"
+        },
+        {
+          "value": "Release"
+        }
+      ],
+      "default": "Debug",
+      "description": "Select the build type"
+    }
+  ]
+}
