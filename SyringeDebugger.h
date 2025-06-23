@@ -4,6 +4,7 @@
 
 #include "CRC32.h"
 #include "PortableExecutable.h"
+#include "Log.h"
 
 #include <cstring>
 #include <iostream>
@@ -38,7 +39,9 @@ public:
 				dlls.emplace_back(std::string { flagView.begin() + pos + INCLUDE_FLAG.size(),
 					flagView.end() });
 			} else {
-				throw invalid_command_arguments {};
+				Log::WriteLine(
+					__FUNCTION__ ": Unknown flag \"%.*s\", skipping.",
+					printable(flagView));
 			}
 		}
 

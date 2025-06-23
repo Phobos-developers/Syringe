@@ -60,7 +60,7 @@ int Run(std::string_view const arguments) {
 	catch(invalid_command_arguments const&)
 	{
 		MessageBoxA(
-			nullptr, "Syringe cannot be run just like that.\n\n"
+			nullptr, "Syringe cannot be run like that.\n\n"
 			"Usage:\nSyringe.exe [-i=<injectedfile.dll> ...] \"<exe name>\" <arguments>",
 			VersionString, MB_OK | MB_ICONINFORMATION);
 
