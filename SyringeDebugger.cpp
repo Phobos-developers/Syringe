@@ -624,54 +624,58 @@ void SyringeDebugger::FindDLLs()
 {
 	Breakpoints.clear();
 
-	for(auto file = FindFile("*.dll"); file; ++file) {
-		std::string_view const fn(file->cFileName);
+	for (const auto& dll : dlls) {
+		Log::WriteLine(__FUNCTION__ ": Searching for DLLs matching \"%s\"...", dll.c_str());
 
-		//Log::WriteLine(
-		//	__FUNCTION__ ": Potential DLL: \"%.*s\"", printable(fn));
+		for(auto file = FindFile(dll.c_str()); file; ++file) {
+			std::string_view const fn(file->cFileName);
 
-		try {
-			PortableExecutable const DLL{ fn };
-			HookBuffer buffer;
-
-			auto canLoad = false;
-			if(auto const hooks = DLL.FindSection(".syhks00")) {
-				canLoad = ParseHooksSection(DLL, *hooks, buffer);
-			} else {
-				canLoad = ParseInjFileHooks(fn, buffer);
-			}
-
-			if(canLoad) {
-				Log::WriteLine(
-					__FUNCTION__ ": Recognized DLL: \"%.*s\"", printable(fn));
-
-				if(auto const res = Handshake(
-					DLL.GetFilename(), static_cast<int>(buffer.count),
-					buffer.checksum.value()))
-				{
-					canLoad = *res;
-				} else if(auto const hosts = DLL.FindSection(".syexe00")) {
-					canLoad = CanHostDLL(DLL, *hosts);
-				}
-			}
-
-			if(canLoad) {
-				for(auto const& it : buffer.hooks) {
-					auto const eip = it.first;
-					auto& h = Breakpoints[eip];
-					h.p_caller_code.clear();
-					h.original_opcode = 0x00;
-					h.hooks.insert(
-						h.hooks.end(), it.second.begin(), it.second.end());
-				}
-			} else if(!buffer.hooks.empty()) {
-				Log::WriteLine(
-					__FUNCTION__ ": DLL load was prevented: \"%.*s\"",
-					printable(fn));
-			}
-		} catch(...) {
 			//Log::WriteLine(
-			//	__FUNCTION__ ": DLL Parse failed: \"%.*s\"", printable(fn));
+			//	__FUNCTION__ ": Potential DLL: \"%.*s\"", printable(fn));
+
+			try {
+				PortableExecutable const DLL{ fn };
+				HookBuffer buffer;
+
+				auto canLoad = false;
+				if(auto const hooks = DLL.FindSection(".syhks00")) {
+					canLoad = ParseHooksSection(DLL, *hooks, buffer);
+				} else {
+					canLoad = ParseInjFileHooks(fn, buffer);
+				}
+
+				if(canLoad) {
+					Log::WriteLine(
+						__FUNCTION__ ": Recognized DLL: \"%.*s\"", printable(fn));
+
+					if(auto const res = Handshake(
+						DLL.GetFilename(), static_cast<int>(buffer.count),
+						buffer.checksum.value()))
+					{
+						canLoad = *res;
+					} else if(auto const hosts = DLL.FindSection(".syexe00")) {
+						canLoad = CanHostDLL(DLL, *hosts);
+					}
+				}
+
+				if(canLoad) {
+					for(auto const& it : buffer.hooks) {
+						auto const eip = it.first;
+						auto& h = Breakpoints[eip];
+						h.p_caller_code.clear();
+						h.original_opcode = 0x00;
+						h.hooks.insert(
+							h.hooks.end(), it.second.begin(), it.second.end());
+					}
+				} else if(!buffer.hooks.empty()) {
+					Log::WriteLine(
+						__FUNCTION__ ": DLL load was prevented: \"%.*s\"",
+						printable(fn));
+				}
+			} catch(...) {
+				//Log::WriteLine(
+				//	__FUNCTION__ ": DLL Parse failed: \"%.*s\"", printable(fn));
+			}
 		}
 	}
 
