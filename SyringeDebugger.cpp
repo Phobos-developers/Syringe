@@ -158,6 +158,15 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
 			{
 				Log::WriteLine(__FUNCTION__ ": Creating code hooks.");
 
+				// FS:[0x14] is a part of the Thread Information Block (TIB)
+				// structure and is designated as the "arbitrary user pointer".
+				// While Raymond Chen has mentioned that this field is "not safe"
+				// to use for arbitrary purposes, this appears to not be the case,
+				// judging by the article he cites as source (lol)
+
+				// https://devblogs.microsoft.com/oldnewthing/20190418-00/?p=102428
+				// https://web.archive.org/web/20250707201905/http://www.nynaeve.net/?p=98
+
 				static BYTE const code_call[] =
 				{
 					0x60, 0x9C, // PUSHAD, PUSHFD
@@ -165,12 +174,16 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
 					0x54, // PUSH ESP
 					0xE8, INIT, INIT, INIT, INIT, // CALL ProcAddress
 					0x83, 0xC4, 0x08, // ADD ESP, 8
-					0xA3, INIT, INIT, INIT, INIT, // MOV ds:ReturnEIP, EAX
+					0x64, /* FS segment prefix*/ 0xA3, 0x14, 0x00, 0x00, 0x00, // MOV fs:0x14, EAX
 					0x9D, 0x61, // POPFD, POPAD
-					0x83, 0x3D, INIT, INIT, INIT, INIT, 0x00, // CMP ds:ReturnEIP, 0
-					0x74, 0x06, // JZ .proceed
-					0xFF, 0x25, INIT, INIT, INIT, INIT, // JMP ds:ReturnEIP
+					0x64, /* FS segment prefix*/ 0x83, 0x3D, 0x14, 0x00, 0x00, 0x00, 0x00, // CMP DWORD PTR fs:0x14, 0
+					0x74, 0x07, // JE proceed
+					0x64, /* FS segment prefix*/ 0xFF, 0x25, 0x14, 0x00, 0x00, 0x00, // JMP DWORD PTR fs:0x14
+					// proceed:
+					// here will be the overwritten bytes and jump back
 				};
+
+				// return 0 hooks are chained, so this structure may repeat
 
 				static BYTE const jmp_back[] = { 0xE9, INIT, INIT, INIT, INIT };
 				static BYTE const jmp[] = { 0xE9, INIT, INIT, INIT, INIT };
@@ -222,11 +235,6 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
 							auto const rel = RelativeOffset(
 								base + (p_code - code.data() + 0x0D), hook.proc_address);
 							ApplyPatch(p_code + 0x09, rel); // CALL
-
-							auto const pdReturnEIP = &GetData()->ReturnEIP;
-							ApplyPatch(p_code + 0x11, pdReturnEIP); // MOV
-							ApplyPatch(p_code + 0x19, pdReturnEIP); // CMP
-							ApplyPatch(p_code + 0x22, pdReturnEIP); // JMP ds:ReturnEIP
 
 							p_code += sizeof(code_call);
 						}
