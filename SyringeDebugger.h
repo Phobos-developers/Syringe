@@ -4,14 +4,18 @@
 
 #include "CRC32.h"
 #include "PortableExecutable.h"
+#include "Log.h"
 
 #include <cstring>
 #include <iostream>
 #include <map>
 #include <optional>
+#include <ranges>
 #include <string_view>
 
 #include <windows.h>
+
+using std::operator""sv;
 
 class SyringeDebugger
 {
@@ -21,10 +25,30 @@ class SyringeDebugger
 	static constexpr BYTE INT3 = 0xCC; // trap to debugger interrupt opcode.
 	static constexpr BYTE NOP = 0x90;
 
+	static constexpr std::string_view INCLUDE_FLAG = "-i=";
+
 public:
-	SyringeDebugger(std::string_view filename)
+	SyringeDebugger(std::string_view filename, std::string_view flags = "")
 		: exe(filename)
 	{
+		// parse all -i=filename_to_inject from flags
+		for (auto const flag : std::views::split(flags, " "sv)) {
+			auto const flagView = std::string_view{ flag.begin(), flag.end() };
+			auto const pos = flagView.find(INCLUDE_FLAG);
+			if(pos != std::string_view::npos) {
+				dlls.emplace_back(std::string { flagView.begin() + pos + INCLUDE_FLAG.size(),
+					flagView.end() });
+			} else {
+				Log::WriteLine(
+					__FUNCTION__ ": Unknown flag \"%.*s\", skipping.",
+					printable(flagView));
+			}
+		}
+
+		if (dlls.empty()) {
+			dlls.emplace_back("*.dll");
+		}
+
 		RetrieveInfo();
 	}
 
@@ -102,6 +126,7 @@ private:
 
 	// syringe
 	std::string exe;
+	std::vector<std::string> dlls {};
 	void* pcEntryPoint{ nullptr };
 	void* pImLoadLibrary{ nullptr };
 	void* pImGetProcAddress{ nullptr };

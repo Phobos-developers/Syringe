@@ -25,17 +25,12 @@ int Run(std::string_view const arguments) {
 	{
 		auto const command = get_command_line(arguments);
 
-		if(!command.flags.empty()) {
-			// artificial limitation
-			throw invalid_command_arguments{};
-		}
-
 		Log::WriteLine(
 			"WinMain: Trying to load executable file \"%.*s\"...",
 			printable(command.executable));
 		Log::WriteLine();
 
-		SyringeDebugger Debugger{ command.executable };
+		SyringeDebugger Debugger{ command.executable, command.flags };
 		failure = "Could not run executable.";
 
 		Log::WriteLine("WinMain: SyringeDebugger::FindDLLs();");
@@ -65,12 +60,12 @@ int Run(std::string_view const arguments) {
 	catch(invalid_command_arguments const&)
 	{
 		MessageBoxA(
-			nullptr, "Syringe cannot be run just like that.\n\n"
-			"Usage:\nSyringe.exe \"<exe name>\" <arguments>",
+			nullptr, "Syringe cannot be run like that.\n\n"
+			"Usage:\nSyringe.exe [-i=<injectedfile.dll> ...] \"<exe name>\" <arguments>",
 			VersionString, MB_OK | MB_ICONINFORMATION);
 
 		Log::WriteLine(
-			"WinMain: No or invalid command line arguments given, exiting...");
+			"WinMain: Invalid command line arguments given, exiting...");
 
 		exit_code = ERROR_INVALID_PARAMETER;
 	}
