@@ -1,13 +1,14 @@
 #include "Log.h"
 #include "SyringeDebugger.h"
 #include "Support.h"
+#include "resource.h"
 
 #include <string>
 
 #include <commctrl.h>
 
 int Run(std::string_view const arguments) {
-	constexpr auto const VersionString = "Syringe 0.7.2.0";
+	constexpr auto const VersionString = "SyringeEx " SYRINGEEX_VER_TEXT ", based on Syringe 0.7.2.0";
 
 	InitCommonControls();
 

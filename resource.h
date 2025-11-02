@@ -14,3 +14,24 @@
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif
+
+
+/* numeric parts */
+#define SYRINGEEX_VER_EPOCH  0
+#define SYRINGEEX_VER_MAJOR  1
+#define SYRINGEEX_VER_MINOR  0
+#define SYRINGEEX_VER_PATCH  0
+
+/* useful numeric expansion for VERSIONINFO (comma-separated) */
+#define SYRINGEEX_VER SYRINGEEX_VER_EPOCH, SYRINGEEX_VER_MAJOR, SYRINGEEX_VER_MINOR, SYRINGEEX_VER_PATCH
+
+/* stringification helper (two levels required to expand macro args) */
+#define STRINGIFY_HELPER(x) #x
+#define STRINGIFY(x)        STRINGIFY_HELPER(x)
+
+/* textual version "0.1.0.0" */
+#define SYRINGEEX_VER_TEXT \
+    STRINGIFY(SYRINGEEX_VER_EPOCH) "." \
+    STRINGIFY(SYRINGEEX_VER_MAJOR) "." \
+    STRINGIFY(SYRINGEEX_VER_MINOR) "." \
+    STRINGIFY(SYRINGEEX_VER_PATCH)

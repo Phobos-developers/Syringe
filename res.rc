@@ -1,22 +1,22 @@
 // Microsoft Visual C++ generated resource script.
 //
 #include "resource.h"
-#include "windows.h"
 /////////////////////////////////////////////////////////////////////////////
+// English (United States) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(1252)
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
 
 // Icon with lowest ID value placed first to ensure application icon
 // remains consistent on all systems.
 IDI_ICON1               ICON                    "syringe.ico"
-/////////////////////////////////////////////////////////////////////////////
 
-
-/////////////////////////////////////////////////////////////////////////////
-// English (U.S.) resources
-
-#ifdef _WIN32
-LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
-#pragma code_page(1252)
-#endif //_WIN32
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -24,8 +24,8 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,7,2,0
- PRODUCTVERSION 0,7,2,0
+ FILEVERSION SYRINGEEX_VER
+ PRODUCTVERSION SYRINGEEX_VER
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -40,14 +40,14 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "Patrick Dinklage"
-            VALUE "FileDescription", "Syringe Main Executable"
-            VALUE "FileVersion", "0, 7, 1, 1"
-            VALUE "InternalName", "Syringe"
-            VALUE "LegalCopyright", "Copyright © 2008 - 2017 Patrick Dinklage, DCoder, and AlexB"
+            VALUE "CompanyName", "Phobos Developers"
+            VALUE "FileDescription", "SyringeEx Main Executable"
+            VALUE "FileVersion", SYRINGEEX_VER_TEXT
+            VALUE "InternalName", "SyringeEx"
+            VALUE "LegalCopyright", "Copyright © 2008 - 2017 Patrick Dinklage, DCoder, and AlexB; Copyright © 2025 Phobos Developers"
             VALUE "OriginalFilename", "Syringe.exe"
             VALUE "ProductName", "Syringe"
-            VALUE "ProductVersion", "0, 7, 1, 1"
+            VALUE "ProductVersion", SYRINGEEX_VER_TEXT
         END
     END
     BLOCK "VarFileInfo"
@@ -55,3 +55,44 @@ BEGIN
         VALUE "Translation", 0x409, 1200
     END
 END
+
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE 
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE 
+BEGIN
+    "\0"
+END
+
+3 TEXTINCLUDE 
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+#endif    // English (United States) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+
