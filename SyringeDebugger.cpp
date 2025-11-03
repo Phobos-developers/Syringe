@@ -180,12 +180,13 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
 					0x5F, // POP EDI
 					0x5E, // POP ESI
 					0x5D, // POP EBP
-					0x58, // POP EAX (temporary store for ESP)
+					0x5B, // POP EBX (temporary storage for modified ESP)
+					0x8B, 0x44, 0x24, 0x0C, // MOV EAX, [ESP + 0xC] (restore EAX which is last in PUSHAD order)
+					0x89, 0x5C, 0x24, 0x0C, // MOV [ESP + 0xC], EBX (place ESP last)
 					0x5B, // POP EBX
 					0x5A, // POP EDX
 					0x59, // POP ECX
-					0x87, 0x04, 0x24, // XCHG [ESP], EAX (this restores EAX and the data for ESP is now on stack)
-					0x5C, // POP ESP (this restores ESP last thus not corrupting the stack pointer before all POPs are done)
+					0x5C, // POP ESP (restore ESP last thus not corrupting the stack pointer before all POPs are done)
 					// end POPAD replica
 					0x64, /* FS segment prefix*/ 0x83, 0x3D, 0x14, 0x00, 0x00, 0x00, 0x00, // CMP DWORD PTR fs:0x14, 0
 					0x74, 0x07, // JE proceed
