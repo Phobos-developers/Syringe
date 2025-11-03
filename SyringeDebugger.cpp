@@ -175,7 +175,19 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
 					0xE8, INIT, INIT, INIT, INIT, // CALL ProcAddress
 					0x83, 0xC4, 0x08, // ADD ESP, 8
 					0x64, /* FS segment prefix*/ 0xA3, 0x14, 0x00, 0x00, 0x00, // MOV fs:0x14, EAX
-					0x9D, 0x61, // POPFD, POPAD
+					0x9D, // POPFD
+					// start POPAD replica
+					0x5F, // POP EDI
+					0x5E, // POP ESI
+					0x5D, // POP EBP
+					0x5B, // POP EBX (temporary storage for modified ESP)
+					0x8B, 0x44, 0x24, 0x0C, // MOV EAX, [ESP + 0xC] (restore EAX which is last in PUSHAD order)
+					0x89, 0x5C, 0x24, 0x0C, // MOV [ESP + 0xC], EBX (place ESP last)
+					0x5B, // POP EBX
+					0x5A, // POP EDX
+					0x59, // POP ECX
+					0x5C, // POP ESP (restore ESP last thus not corrupting the stack pointer before all POPs are done)
+					// end POPAD replica
 					0x64, /* FS segment prefix*/ 0x83, 0x3D, 0x14, 0x00, 0x00, 0x00, 0x00, // CMP DWORD PTR fs:0x14, 0
 					0x74, 0x07, // JE proceed
 					0x64, /* FS segment prefix*/ 0xFF, 0x25, 0x14, 0x00, 0x00, 0x00, // JMP DWORD PTR fs:0x14
