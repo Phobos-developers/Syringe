@@ -89,6 +89,29 @@ public:
     bool SetBP(void* address);
     void RemoveBP(LPVOID address, bool restoreOpcode);
 
+    // Wine-safe bootstrap redirection: SetThreadContext's Eip field is not
+    // reliably honored by Wine's wow64 debug-event resume path when jumping
+    // to a distant, dynamically-allocated address (confirmed empirically -
+    // the thread just continues from wherever it actually was, silently
+    // ignoring the requested Eip, even though GetThreadContext falsely
+    // confirms the change). WriteProcessMemory-based code patching, by
+    // contrast, is reliable. These helpers redirect execution by writing a
+    // real JMP instruction at the actual CPU resume address (bpAddr+1, per
+    // standard INT3 semantics) instead of mutating thread context.
+    size_t DetermineOverwriteSize(void* addr, size_t minBytes);
+    bool WriteRedirectJmp(void* resumeAddr, void* target);
+    void BuildEntryTrampoline();
+
+    // Installs all real, ongoing hooks (writing JMP instructions at every
+    // registered hook site throughout the target). Originally only ever
+    // triggered by redirecting back to pcEntryPoint and waiting for a fresh
+    // breakpoint exception to fire there again - a mechanism that depends on
+    // Wine correctly honoring a SetThreadContext-based Eip change, which it
+    // does not. Called directly instead, the moment DLL loading and feature
+    // flag resolution finish, since the debugger already has full control at
+    // that point and does not need to wait for anything further.
+    void CreateCodeHooks();
+
     // memory
     VirtualMemoryHandle AllocMem(void* address, size_t size);
     bool PatchMem(void* address, void const* buffer, DWORD size);
@@ -197,6 +220,11 @@ private:
 
     bool bDLLsLoaded{ false };
     bool bHooksCreated{ false };
+
+    // Wine-safe bootstrap redirection state (see WriteRedirectJmp).
+    VirtualMemoryHandle pEntryTrampoline;
+    void* entryContinueAddr{ nullptr };
+    size_t entryOverwriteSize{ 0 };
 
     bool bAVLogged{ false };
 

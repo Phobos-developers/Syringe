@@ -70,6 +70,80 @@ bool SyringeDebugger::SetBP(void* address)
     return true;
 }
 
+size_t SyringeDebugger::DetermineOverwriteSize(void* addr, size_t minBytes)
+{
+    // Read a generous window and decode instructions one at a time until
+    // we've accumulated at least minBytes worth of complete instructions -
+    // never cutting an instruction in half, same principle RebuildInstructions
+    // already relies on elsewhere in this file.
+    constexpr size_t ReadWindow = 32;
+    BYTE buffer[ReadWindow] = {};
+    ReadMem(addr, buffer, ReadWindow);
+
+    ZydisDecoder decoder;
+    ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_COMPAT_32, ZYDIS_STACK_WIDTH_32);
+
+    size_t offset = 0;
+    while (offset < minBytes && offset < ReadWindow)
+    {
+        ZydisDecodedInstruction instruction;
+        ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
+
+        if (ZYAN_FAILED(ZydisDecoderDecodeFull(
+                &decoder, buffer + offset, ReadWindow - offset, &instruction, operands)))
+        {
+            // Undecodable bytes here: fall back to a plain minBytes overwrite
+            // rather than risk splitting an instruction in half.
+            return minBytes;
+        }
+
+        offset += instruction.length;
+    }
+
+    return offset;
+}
+
+bool SyringeDebugger::WriteRedirectJmp(void* resumeAddr, void* target)
+{
+    BYTE jmpBytes[5];
+    jmpBytes[0] = 0xE9;
+    auto const rel = RelativeOffset(
+        reinterpret_cast<BYTE*>(resumeAddr) + 5, target);
+    ApplyPatch(jmpBytes + 1, rel);
+
+    return PatchMem(resumeAddr, jmpBytes, sizeof(jmpBytes));
+}
+
+void SyringeDebugger::BuildEntryTrampoline()
+{
+    entryOverwriteSize = DetermineOverwriteSize(pcEntryPoint, 5);
+
+    std::vector<BYTE> original(entryOverwriteSize);
+    ReadMem(pcEntryPoint, original.data(), entryOverwriteSize);
+
+    // trampoline buffer: rebuilt original instructions + jmp back to
+    // pcEntryPoint+entryOverwriteSize to resume normal execution for real.
+    auto const trampolineSize = entryOverwriteSize * 3 + 5;
+    pEntryTrampoline = AllocMem(nullptr, trampolineSize);
+    entryContinueAddr = reinterpret_cast<BYTE*>(pcEntryPoint) + entryOverwriteSize;
+
+    auto rebuilt = RebuildInstructions(
+        original.data(), entryOverwriteSize,
+        reinterpret_cast<DWORD>(pcEntryPoint),
+        reinterpret_cast<DWORD>(pEntryTrampoline.get()));
+
+    std::vector<BYTE> code = rebuilt;
+    auto const jmpBackAt = pEntryTrampoline.get() + code.size();
+    BYTE jmpBack[5];
+    jmpBack[0] = 0xE9;
+    auto const rel = RelativeOffset(
+        reinterpret_cast<BYTE*>(jmpBackAt) + 5, entryContinueAddr);
+    ApplyPatch(jmpBack + 1, rel);
+    code.insert(code.end(), jmpBack, jmpBack + 5);
+
+    PatchMem(pEntryTrampoline.get(), code.data(), code.size());
+}
+
 DWORD __fastcall SyringeDebugger::RelativeOffset(void const* pFrom, void const* pTo)
 {
     auto const from = reinterpret_cast<DWORD>(pFrom);
@@ -326,6 +400,163 @@ std::vector<BYTE> SyringeDebugger::RebuildInstructions(
     return result;
 }
 
+void SyringeDebugger::CreateCodeHooks()
+{
+    if (bHooksCreated)
+    {
+        return;
+    }
+
+    Log::WriteLine(__FUNCTION__ ": Creating code hooks.");
+
+    // FS:[0x14] is a part of the Thread Information Block (TIB)
+    // structure and is designated as the "arbitrary user pointer".
+    // While Raymond Chen has mentioned that this field is "not safe"
+    // to use for arbitrary purposes, this appears to not be the case,
+    // judging by the article he cites as source (lol)
+
+    // https://devblogs.microsoft.com/oldnewthing/20190418-00/?p=102428
+    // https://web.archive.org/web/20250707201905/http://www.nynaeve.net/?p=98
+
+    #define POPFD_POPAD \
+        0x9D, /* POPFD */ \
+        /* start POPAD replica */ \
+        0x5F, /* POP EDI */ \
+        0x5E, /* POP ESI */ \
+        0x5D, /* POP EBP */ \
+        0x5B, /* POP EBX (temporary storage for modified ESP) */ \
+        0x8B, 0x44, 0x24, 0x0C, /* MOV EAX, [ESP + 0xC] (restore EAX which is last in PUSHAD order) */ \
+        0x89, 0x5C, 0x24, 0x0C, /* MOV [ESP + 0xC], EBX (place ESP last) */ \
+        0x5B, /* POP EBX */ \
+        0x5A, /* POP EDX */ \
+        0x59, /* POP ECX */ \
+        0x5C /* POP ESP (restore ESP last thus not corrupting the stack pointer before all POPs are done) */ \
+        /* end POPAD replica */
+
+    static BYTE const code_call[] =
+    {
+        0x60, 0x9C, // PUSHAD, PUSHFD
+        0x68, INIT, INIT, INIT, INIT, // PUSH HookAddress
+        0x54, // PUSH ESP (final REGISTERS* argument)
+        0xE8, INIT, INIT, INIT, INIT, // CALL ProcAddress
+        0x83, 0xC4, 0x08, // ADD ESP, 8
+        0x64, /* FS segment prefix */ 0xA3, 0x14, 0x00, 0x00, 0x00, // MOV fs:0x14, EAX
+        0x64, /* FS segment prefix */ 0x83, 0x3D, 0x14, 0x00, 0x00, 0x00, 0x00, // CMP DWORD PTR fs:0x14, 0
+        0x74, 0x18, // JE proceed
+
+        // jmp_to_address:
+        POPFD_POPAD,
+        0x64, /* FS segment prefix */ 0xFF, 0x25, 0x14, 0x00, 0x00, 0x00, // JMP DWORD PTR fs:0x14
+
+        // proceed:
+        POPFD_POPAD,
+        // here will be the overwritten bytes and jump back
+    };
+
+    // return 0 hooks are chained, so this structure may repeat
+
+    static BYTE const jmp_back[] = { 0xE9, INIT, INIT, INIT, INIT };
+    static BYTE const jmp[] = { 0xE9, INIT, INIT, INIT, INIT };
+
+    std::vector<BYTE> code;
+
+    for (auto& it : Breakpoints)
+    {
+        if (it.first == nullptr || it.first == pcEntryPoint)
+        {
+            continue;
+        }
+
+        auto const [count, overridden] = std::accumulate(
+            it.second.hooks.cbegin(), it.second.hooks.cend(),
+            std::make_pair(0u, 0u), [](auto acc, auto const& hook)
+            {
+                if (hook.proc_address) {
+                    if (acc.second < hook.num_overridden) {
+                        acc.second = hook.num_overridden;
+                    }
+                    acc.first++;
+                }
+                return acc; });
+
+        if (!count)
+        {
+            continue;
+        }
+
+        // read the overridden bytes from the target process
+        std::vector<BYTE> original_bytes(overridden);
+        ReadMem(it.first, original_bytes.data(), overridden);
+
+        // use a conservative upper bound for rebuilt instructions,
+        // since relative instruction re-encoding may change sizes
+        // (e.g. short branch -> near branch)
+        auto const max_rebuilt = overridden * 3;
+        auto const sz = count * sizeof(code_call) + sizeof(jmp_back) + max_rebuilt;
+
+        code.resize(sz);
+        auto p_code = code.data();
+
+        it.second.p_caller_code = AllocMem(nullptr, sz);
+        auto const base = it.second.p_caller_code.get();
+
+        // write caller code
+        for (auto const& hook : it.second.hooks)
+        {
+            if (hook.proc_address)
+            {
+                ApplyPatch(p_code, code_call);		 // code
+                ApplyPatch(p_code + 0x03, it.first); // PUSH HookAddress
+
+                auto const rel = RelativeOffset(
+                    base + (p_code - code.data() + 0x0D), hook.proc_address);
+                ApplyPatch(p_code + 0x09, rel); // CALL
+
+                p_code += sizeof(code_call);
+            }
+        }
+
+        // rebuild overridden bytes, adjusting relative addresses
+        if (overridden)
+        {
+            auto const originalAddr = reinterpret_cast<DWORD>(it.first);
+            auto const newAddr = reinterpret_cast<DWORD>(
+                base + (p_code - code.data()));
+
+            auto rebuilt = RebuildInstructions(
+                original_bytes.data(), overridden, originalAddr, newAddr);
+
+            std::memcpy(p_code, rebuilt.data(), rebuilt.size());
+            p_code += rebuilt.size();
+        }
+
+        // write the jump back
+        auto const rel = RelativeOffset(
+            base + (p_code - code.data() + 0x05),
+            static_cast<BYTE*>(it.first) + 0x05);
+        ApplyPatch(p_code, jmp_back);
+        ApplyPatch(p_code + 0x01, rel);
+        p_code += sizeof(jmp_back);
+
+        auto const actual_sz = static_cast<size_t>(p_code - code.data());
+        PatchMem(base, code.data(), actual_sz);
+
+        // patch original code
+        auto const p_original_code = static_cast<BYTE*>(it.first);
+
+        auto const rel2 = RelativeOffset(p_original_code + 5, base);
+        code.assign(std::max(overridden, sizeof(jmp)), NOP);
+        ApplyPatch(code.data(), jmp);
+        ApplyPatch(code.data() + 0x01, rel2);
+
+        PatchMem(p_original_code, code.data(), code.size());
+    }
+
+    Log::Flush();
+
+    bHooksCreated = true;
+}
+
 DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
 {
     auto const exceptCode = dbgEvent.u.Exception.ExceptionRecord.ExceptionCode;
@@ -358,8 +589,17 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
         // load DLLs and retrieve proc addresses
         if (!bDLLsLoaded)
         {
-            // restore
-            PatchMem(exceptAddr, &Breakpoints[exceptAddr].original_opcode, 1);
+            bool const isFirstVisit = (loop_LoadLibrary == v_AllHooks.end());
+
+            if (isFirstVisit && exceptAddr == pcEntryPoint)
+            {
+                // restore the real original first byte (saved by SetBP)
+                // before reading pcEntryPoint's bytes for real, then build
+                // the trampoline that will let us resume real execution
+                // there later without losing any original instructions.
+                PatchMem(exceptAddr, &Breakpoints[exceptAddr].original_opcode, 1);
+                BuildEntryTrampoline();
+            }
 
             if (loop_LoadLibrary == v_AllHooks.end())
             {
@@ -381,13 +621,18 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
                 ++loop_LoadLibrary;
             }
 
+            // The CPU resumes at exceptAddr+1 per standard INT3 semantics
+            // (auto-advanced past the 1-byte breakpoint opcode). We redirect
+            // by writing a real JMP there instead of touching thread context.
+            void* resumeAddr = reinterpret_cast<BYTE*>(exceptAddr) + 1;
+
             if (loop_LoadLibrary != v_AllHooks.end())
             {
                 auto const& hook = *loop_LoadLibrary;
                 PatchMem(&GetData()->LibName, hook->lib, MaxNameLength);
                 PatchMem(&GetData()->ProcName, hook->proc, MaxNameLength);
 
-                context.Eip = reinterpret_cast<DWORD>(&GetData()->LoadLibraryFunc);
+                WriteRedirectJmp(resumeAddr, &GetData()->LoadLibraryFunc);
             }
             else
             {
@@ -402,19 +647,17 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
                     PatchMem(&GetData()->LibName, entry.lib, MaxNameLength);
                     PatchMem(&GetData()->ProcName, entry.symbol, MaxNameLength);
 
-                    context.Eip = reinterpret_cast<DWORD>(&GetData()->LoadLibraryFunc);
+                    WriteRedirectJmp(resumeAddr, &GetData()->LoadLibraryFunc);
                 }
                 else
                 {
                     bFeaturesSet = true;
-                    context.Eip = reinterpret_cast<DWORD>(pcEntryPoint);
+                    // No feature flags AND no more DLLs to load in one shot:
+                    // all hooks can be installed right now.
+                    CreateCodeHooks();
+                    WriteRedirectJmp(resumeAddr, pEntryTrampoline.get());
                 }
             }
-
-            // single step mode
-            context.EFlags |= 0x100;
-            context.ContextFlags = CONTEXT_CONTROL;
-            SetThreadContext(currentThread, &context);
 
             threadInfo.lastBP = exceptAddr;
 
@@ -424,8 +667,13 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
         // set feature flags in loaded DLLs
         if (!bFeaturesSet)
         {
-            // restore
-            PatchMem(exceptAddr, &Breakpoints[exceptAddr].original_opcode, 1);
+            // No restore here: exceptAddr is the stub's own embedded INT3
+            // (in pAlloc), never registered via SetBP, so Breakpoints[exceptAddr]
+            // is a meaningless default-constructed entry. Restoring from it
+            // would zero out the stub's own breakpoint marker, corrupting
+            // every subsequent re-execution of the stub. It must stay intact
+            // across all iterations since we always redirect away from it via
+            // WriteRedirectJmp rather than ever falling through past it.
 
             // read the resolved address of the feature flag in the target process
             void* flagAddr = nullptr;
@@ -448,26 +696,24 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
 
             ++loop_FeatureFlags;
 
+            void* resumeAddr = reinterpret_cast<BYTE*>(exceptAddr) + 1;
+
             if (loop_FeatureFlags != v_FeatureFlags.end())
             {
                 auto const& entry = *loop_FeatureFlags;
                 PatchMem(&GetData()->LibName, entry.lib, MaxNameLength);
                 PatchMem(&GetData()->ProcName, entry.symbol, MaxNameLength);
 
-                context.Eip = reinterpret_cast<DWORD>(&GetData()->LoadLibraryFunc);
+                WriteRedirectJmp(resumeAddr, &GetData()->LoadLibraryFunc);
             }
             else
             {
                 Log::WriteLine(__FUNCTION__ ": Finished setting feature flags.");
                 bFeaturesSet = true;
 
-                context.Eip = reinterpret_cast<DWORD>(pcEntryPoint);
+                CreateCodeHooks();
+                WriteRedirectJmp(resumeAddr, pEntryTrampoline.get());
             }
-
-            // single step mode
-            context.EFlags |= 0x100;
-            context.ContextFlags = CONTEXT_CONTROL;
-            SetThreadContext(currentThread, &context);
 
             threadInfo.lastBP = exceptAddr;
 
@@ -820,7 +1066,9 @@ void SyringeDebugger::Run(std::string_view const arguments)
         0x5A,								// pop edx
         0x59,								// pop ecx
         0x58,								// pop eax
-        INT3, NOP							// int3 and some padding
+        INT3, NOP, NOP, NOP, NOP, NOP		// int3 and enough padding for a
+                                            // WriteRedirectJmp (5 bytes) to
+                                            // land safely right after it
     };
 
     std::array<BYTE, AllocDataSize> data;
@@ -858,7 +1106,6 @@ void SyringeDebugger::Run(std::string_view const arguments)
         WaitForDebugEvent(&dbgEvent, INFINITE);
 
         DWORD continueStatus = DBG_CONTINUE;
-        bool wasSingleStep = false;
 
         switch (dbgEvent.dwDebugEventCode)
         {
@@ -882,7 +1129,6 @@ void SyringeDebugger::Run(std::string_view const arguments)
 
         case EXCEPTION_DEBUG_EVENT:
             continueStatus = HandleException(dbgEvent);
-            wasSingleStep = (dbgEvent.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_SINGLE_STEP);
             break;
 
         case LOAD_DLL_DEBUG_EVENT:
@@ -907,7 +1153,12 @@ void SyringeDebugger::Run(std::string_view const arguments)
 
         ContinueDebugEvent(dbgEvent.dwProcessId, dbgEvent.dwThreadId, continueStatus);
 
-        if (bDetachWhenDone && bHooksCreated && wasSingleStep)
+        // Previously gated on wasSingleStep, since hook creation used to be
+        // detected via a single-step trap after redirecting back to
+        // pcEntryPoint. That path no longer single-steps at all - CreateCodeHooks
+        // now runs synchronously and sets bHooksCreated directly, so checking
+        // it alone is sufficient and correct here.
+        if (bDetachWhenDone && bHooksCreated)
         {
             Log::WriteLine(__FUNCTION__ ": Hooks placed, detaching debugger.");
 
