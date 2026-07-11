@@ -17,6 +17,51 @@
 
 using namespace std;
 
+namespace {
+enum class WineFlavor { NativeWindows, CrossOver, OtherWine };
+
+bool RegistryKeyExists(HKEY root, char const* subKey)
+{
+    HKEY key;
+    if (RegOpenKeyExA(root, subKey, 0, KEY_READ, &key) == ERROR_SUCCESS)
+    {
+        RegCloseKey(key);
+        return true;
+    }
+    return false;
+}
+
+// Wine exports wine_get_version/wine_get_build_id from ntdll; native Windows does not.
+// A mainline Wine can be told to hide those exports (HideWineExports, an anti-detection
+// setting), so also accept the HKCU\Software\Wine configuration key, which such setups
+// still carry and native Windows never has.
+bool IsWineHost()
+{
+    HMODULE ntdll = GetModuleHandleA("ntdll.dll");
+    if (ntdll && (GetProcAddress(ntdll, "wine_get_version") || GetProcAddress(ntdll, "wine_get_build_id")))
+        return true;
+    return RegistryKeyExists(HKEY_CURRENT_USER, "Software\\Wine");
+}
+
+// CrossOver's Wine reports a plain "wine-11.0-..." build id, indistinguishable from
+// mainline/Whisky Wine by version, so it is identified instead by the registry keys
+// CrossOver writes into its bottles and plain Wine lacks: the per-bottle
+// HKCU\Software\CrossOver settings key, or the HKLM\Software\CodeWeavers\CrossOver
+// product registration. Either one is sufficient.
+bool IsCrossOverHost()
+{
+    return RegistryKeyExists(HKEY_CURRENT_USER, "Software\\CrossOver")
+        || RegistryKeyExists(HKEY_LOCAL_MACHINE, "Software\\CodeWeavers\\CrossOver");
+}
+
+WineFlavor DetectWineFlavor()
+{
+    if (!IsWineHost()) return WineFlavor::NativeWindows;
+    if (IsCrossOverHost()) return WineFlavor::CrossOver;
+    return WineFlavor::OtherWine;
+}
+} // namespace
+
 void SyringeDebugger::DebugProcess(std::string_view const arguments)
 {
     STARTUPINFO startupInfo{ sizeof(startupInfo) };
@@ -112,6 +157,49 @@ bool SyringeDebugger::WriteRedirectJmp(void* resumeAddr, void* target)
     ApplyPatch(jmpBytes + 1, rel);
 
     return PatchMem(resumeAddr, jmpBytes, sizeof(jmpBytes));
+}
+
+void SyringeDebugger::RedirectExecution(HANDLE thread, void* resumeAddr, void* target)
+{
+    if (bResumeViaThreadContext)
+    {
+        // Native Windows + CrossOver both honor an Eip redirect on debug-event resume,
+        // and CrossOver additionally faults on a written-JMP trampoline, so we write no
+        // JMP here. `target` is a stub start or a pcEntryPoint whose INT3 the caller has
+        // already restored, so setting Eip is sufficient; `resumeAddr` is unused.
+        CONTEXT ctx;
+        ctx.ContextFlags = CONTEXT_CONTROL;
+        GetThreadContext(thread, &ctx);
+        ctx.Eip = reinterpret_cast<DWORD>(target);
+        ctx.ContextFlags = CONTEXT_CONTROL;
+        SetThreadContext(thread, &ctx);
+    }
+    else
+    {
+        // Mainline/Whisky Wine: Eip redirects to distant/allocated targets are silently
+        // ignored, but a real E9 JMP patched at the CPU's actual resume point (bpAddr+1)
+        // is executed. Byte-identical to the JMP-only build.
+        WriteRedirectJmp(resumeAddr, target);
+    }
+}
+
+void SyringeDebugger::ResumeAtEntryPoint(HANDLE thread, void* resumeAddr)
+{
+    void* entryTarget;
+    if (bResumeViaThreadContext)
+    {
+        // Context path: resume at the pristine entry point. Clearing its INT3 is
+        // idempotent - the first entry-breakpoint visit already restored the byte.
+        PatchMem(pcEntryPoint, &Breakpoints[pcEntryPoint].original_opcode, 1);
+        entryTarget = pcEntryPoint;
+    }
+    else
+    {
+        // JMP path: resume through the trampoline, which the first-visit redirect
+        // made mandatory by clobbering entry+1..+5.
+        entryTarget = pEntryTrampoline.get();
+    }
+    RedirectExecution(thread, resumeAddr, entryTarget);
 }
 
 void SyringeDebugger::BuildEntryTrampoline()
@@ -598,7 +686,10 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
                 // the trampoline that will let us resume real execution
                 // there later without losing any original instructions.
                 PatchMem(exceptAddr, &Breakpoints[exceptAddr].original_opcode, 1);
-                BuildEntryTrampoline();
+                // The trampoline is only a JMP-path jump target; the context path resumes at
+                // a pristine pcEntryPoint and never clobbers entry+1..+5, so skip building it.
+                if (!bResumeViaThreadContext)
+                    BuildEntryTrampoline();
             }
 
             if (loop_LoadLibrary == v_AllHooks.end())
@@ -632,7 +723,7 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
                 PatchMem(&GetData()->LibName, hook->lib, MaxNameLength);
                 PatchMem(&GetData()->ProcName, hook->proc, MaxNameLength);
 
-                WriteRedirectJmp(resumeAddr, &GetData()->LoadLibraryFunc);
+                RedirectExecution(currentThread, resumeAddr, &GetData()->LoadLibraryFunc);
             }
             else
             {
@@ -647,7 +738,7 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
                     PatchMem(&GetData()->LibName, entry.lib, MaxNameLength);
                     PatchMem(&GetData()->ProcName, entry.symbol, MaxNameLength);
 
-                    WriteRedirectJmp(resumeAddr, &GetData()->LoadLibraryFunc);
+                    RedirectExecution(currentThread, resumeAddr, &GetData()->LoadLibraryFunc);
                 }
                 else
                 {
@@ -655,7 +746,7 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
                     // No feature flags AND no more DLLs to load in one shot:
                     // all hooks can be installed right now.
                     CreateCodeHooks();
-                    WriteRedirectJmp(resumeAddr, pEntryTrampoline.get());
+                    ResumeAtEntryPoint(currentThread, resumeAddr);
                 }
             }
 
@@ -704,7 +795,7 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
                 PatchMem(&GetData()->LibName, entry.lib, MaxNameLength);
                 PatchMem(&GetData()->ProcName, entry.symbol, MaxNameLength);
 
-                WriteRedirectJmp(resumeAddr, &GetData()->LoadLibraryFunc);
+                RedirectExecution(currentThread, resumeAddr, &GetData()->LoadLibraryFunc);
             }
             else
             {
@@ -712,7 +803,7 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
                 bFeaturesSet = true;
 
                 CreateCodeHooks();
-                WriteRedirectJmp(resumeAddr, pEntryTrampoline.get());
+                ResumeAtEntryPoint(currentThread, resumeAddr);
             }
 
             threadInfo.lastBP = exceptAddr;
@@ -1042,6 +1133,17 @@ void SyringeDebugger::Run(std::string_view const arguments)
         __FUNCTION__ ": Running process to debug. cmd = \"%s %.*s\"",
         exe.c_str(), printable(arguments));
     DebugProcess(arguments);
+
+    // Choose the bootstrap resume mechanism once, based on the host: SetThreadContext on
+    // native Windows and CrossOver (both honor an Eip change; CrossOver's x86->ARM
+    // translator additionally faults on the JMP trampoline), JMP-redirect on mainline/Whisky
+    // Wine (which silently ignores Eip redirects to distant, freshly-allocated targets).
+    WineFlavor const flavor = DetectWineFlavor();
+    bResumeViaThreadContext = (flavor != WineFlavor::OtherWine);
+    Log::WriteLine(__FUNCTION__ ": Host = %s, resume mechanism = %s",
+        flavor == WineFlavor::NativeWindows ? "native Windows"
+        : flavor == WineFlavor::CrossOver ? "Wine (CrossOver)" : "Wine (mainline)",
+        bResumeViaThreadContext ? "SetThreadContext" : "JMP-redirect");
 
     Log::WriteLine(__FUNCTION__ ": Allocating 0x%u bytes...", AllocDataSize);
     pAlloc = AllocMem(nullptr, AllocDataSize);

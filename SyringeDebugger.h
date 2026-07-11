@@ -100,6 +100,14 @@ public:
     // standard INT3 semantics) instead of mutating thread context.
     size_t DetermineOverwriteSize(void* addr, size_t minBytes);
     bool WriteRedirectJmp(void* resumeAddr, void* target);
+    // Redirect the target thread's execution to `target`. On native Windows and
+    // CrossOver this sets Eip (both honor it, and CrossOver's x86->ARM translator
+    // faults on a written-JMP trampoline); on mainline/Whisky Wine it writes a JMP
+    // at `resumeAddr` (Eip redirects to distant targets are silently ignored there).
+    void RedirectExecution(HANDLE thread, void* resumeAddr, void* target);
+    // Resume the target at its entry point once bootstrap is done: on the context path
+    // at the pristine pcEntryPoint, on the JMP path through the entry trampoline.
+    void ResumeAtEntryPoint(HANDLE thread, void* resumeAddr);
     void BuildEntryTrampoline();
 
     // Installs all real, ongoing hooks (writing JMP instructions at every
@@ -225,6 +233,12 @@ private:
     VirtualMemoryHandle pEntryTrampoline;
     void* entryContinueAddr{ nullptr };
     size_t entryOverwriteSize{ 0 };
+
+    // Resume mechanism, chosen once in Run(): true on native Windows AND CrossOver
+    // (SetThreadContext Eip is honored; a written-JMP trampoline faults under
+    // CrossOver's x86->ARM translator). false on mainline/Whisky Wine (Eip redirects
+    // to distant targets are silently ignored; the JMP trampoline works).
+    bool bResumeViaThreadContext{ false };
 
     bool bAVLogged{ false };
 
