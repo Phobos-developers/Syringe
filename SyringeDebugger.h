@@ -6,6 +6,7 @@
 #include "PortableExecutable.h"
 #include "Log.h"
 
+#include <cstddef>
 #include <cstring>
 #include <iostream>
 #include <map>
@@ -47,23 +48,25 @@ public:
             std::string_view const flagView = flag;
 
             // parse all -i=filename_to_inject from flags
-            if (auto const pos = flagView.find(INCLUDE_FLAG); pos != std::string_view::npos)
+            if (auto const includePos = flagView.find(INCLUDE_FLAG);
+                includePos != std::string_view::npos)
             {
-                dlls.emplace_back(flagView.begin() + pos + INCLUDE_FLAG.size(), flagView.end());
+                dlls.emplace_back(
+                    flagView.begin() + includePos + INCLUDE_FLAG.size(), flagView.end());
             }
-            else if (auto const pos = flagView.find(DETACH_FLAG); pos != std::string_view::npos)
+            else if (flagView.find(DETACH_FLAG) != std::string_view::npos)
             {
                 bDetachWhenDone = true;
             }
-            else if (auto const pos = flagView.find(NODETACH_FLAG); pos != std::string_view::npos)
+            else if (flagView.find(NODETACH_FLAG) != std::string_view::npos)
             {
                 bDetachWhenDone = false;
             }
-            else if (auto const pos = flagView.find(NOWAIT_FLAG); pos != std::string_view::npos)
+            else if (flagView.find(NOWAIT_FLAG) != std::string_view::npos)
             {
                 bWaitForProcessEnd = false;
             }
-            else if (auto const pos = flagView.find(HANDSHAKES_FLAG); pos != std::string_view::npos)
+            else if (flagView.find(HANDSHAKES_FLAG) != std::string_view::npos)
             {
                 bHandshakes = true;
             }
@@ -91,7 +94,9 @@ public:
 
     // memory
     VirtualMemoryHandle AllocMem(void* address, size_t size);
+    void MakeExecutable(VirtualMemoryHandle const& memory, size_t size);
     bool PatchMem(void* address, void const* buffer, DWORD size);
+    bool PatchCode(void* address, void const* buffer, DWORD size);
     bool ReadMem(void const* address, void* buffer, DWORD size);
 
     // syringe
@@ -186,7 +191,8 @@ private:
     void* pcEntryPoint{ nullptr };
     void* pImLoadLibrary{ nullptr };
     void* pImGetProcAddress{ nullptr };
-    VirtualMemoryHandle pAlloc;
+    VirtualMemoryHandle pLoaderCode;
+    VirtualMemoryHandle pExchangeData;
     DWORD dwTimeStamp{ 0u };
     DWORD dwExeSize{ 0u };
     DWORD dwExeCRC{ 0u };
@@ -200,19 +206,21 @@ private:
 
     bool bAVLogged{ false };
 
-    // data addresses
-    struct AllocData
+    struct ExchangeData
     {
-        static constexpr auto CodeSize = 0x40u;
-        std::byte LoadLibraryFunc[CodeSize];
         void* ProcAddress;
         char LibName[MaxNameLength];
         char ProcName[MaxNameLength];
     };
 
-    AllocData* GetData() const noexcept
+    ExchangeData* GetData() const noexcept
     {
-        return reinterpret_cast<AllocData*>(pAlloc.get());
+        return reinterpret_cast<ExchangeData*>(pExchangeData.get());
+    };
+
+    BYTE* GetLoaderCode() const noexcept
+    {
+        return pLoaderCode.get();
     };
 
     struct HookBuffer

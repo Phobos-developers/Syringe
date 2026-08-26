@@ -12,6 +12,7 @@
 #include <memory>
 #include <numeric>
 #include <set>
+#include <vector>
 
 #include <DbgHelp.h>
 
@@ -19,7 +20,8 @@ using namespace std;
 
 void SyringeDebugger::DebugProcess(std::string_view const arguments)
 {
-    STARTUPINFO startupInfo{ sizeof(startupInfo) };
+    STARTUPINFO startupInfo{};
+    startupInfo.cb = sizeof(startupInfo);
 
     SetEnvironmentVariable("_NO_DEBUG_HEAP", "1");
 
@@ -42,6 +44,12 @@ bool SyringeDebugger::PatchMem(void* address, void const* buffer, DWORD size)
     return (WriteProcessMemory(workingHandle, address, buffer, size, nullptr) != FALSE);
 }
 
+bool SyringeDebugger::PatchCode(void* address, void const* buffer, DWORD size)
+{
+    return PatchMem(address, buffer, size)
+        && FlushInstructionCache(workingHandle, address, size) != FALSE;
+}
+
 bool SyringeDebugger::ReadMem(void const* address, void* buffer, DWORD size)
 {
     return (ReadProcessMemory(workingHandle, address, buffer, size, nullptr) != FALSE);
@@ -57,6 +65,15 @@ VirtualMemoryHandle SyringeDebugger::AllocMem(void* address, size_t size)
     throw_lasterror_or(ERROR_ERRORS_ENCOUNTERED, exe);
 }
 
+void SyringeDebugger::MakeExecutable(VirtualMemoryHandle const& memory, size_t size)
+{
+    if (!memory.protect(size, PAGE_EXECUTE_READ)
+        || !memory.flush_instruction_cache(size))
+    {
+        throw_lasterror_or(ERROR_ERRORS_ENCOUNTERED, exe);
+    }
+}
+
 bool SyringeDebugger::SetBP(void* address)
 {
     // save overwritten code and set INT 3
@@ -64,7 +81,7 @@ bool SyringeDebugger::SetBP(void* address)
     {
         auto const buffer = INT3;
         ReadMem(address, &opcode, 1);
-        return PatchMem(address, &buffer, 1);
+        return PatchCode(address, &buffer, 1);
     }
 
     return true;
@@ -352,14 +369,20 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
         {
             auto const buffer = INT3;
             context.EFlags &= ~0x100;
-            PatchMem(threadInfo.lastBP, &buffer, 1);
+            if (!PatchCode(threadInfo.lastBP, &buffer, 1))
+            {
+                throw_lasterror_or(ERROR_ERRORS_ENCOUNTERED, exe);
+            }
         }
 
         // load DLLs and retrieve proc addresses
         if (!bDLLsLoaded)
         {
             // restore
-            PatchMem(exceptAddr, &Breakpoints[exceptAddr].original_opcode, 1);
+            if (!PatchCode(exceptAddr, &Breakpoints[exceptAddr].original_opcode, 1))
+            {
+                throw_lasterror_or(ERROR_ERRORS_ENCOUNTERED, exe);
+            }
 
             if (loop_LoadLibrary == v_AllHooks.end())
             {
@@ -387,7 +410,7 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
                 PatchMem(&GetData()->LibName, hook->lib, MaxNameLength);
                 PatchMem(&GetData()->ProcName, hook->proc, MaxNameLength);
 
-                context.Eip = reinterpret_cast<DWORD>(&GetData()->LoadLibraryFunc);
+                context.Eip = reinterpret_cast<DWORD>(GetLoaderCode());
             }
             else
             {
@@ -402,7 +425,7 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
                     PatchMem(&GetData()->LibName, entry.lib, MaxNameLength);
                     PatchMem(&GetData()->ProcName, entry.symbol, MaxNameLength);
 
-                    context.Eip = reinterpret_cast<DWORD>(&GetData()->LoadLibraryFunc);
+                    context.Eip = reinterpret_cast<DWORD>(GetLoaderCode());
                 }
                 else
                 {
@@ -425,7 +448,10 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
         if (!bFeaturesSet)
         {
             // restore
-            PatchMem(exceptAddr, &Breakpoints[exceptAddr].original_opcode, 1);
+            if (!PatchCode(exceptAddr, &Breakpoints[exceptAddr].original_opcode, 1))
+            {
+                throw_lasterror_or(ERROR_ERRORS_ENCOUNTERED, exe);
+            }
 
             // read the resolved address of the feature flag in the target process
             void* flagAddr = nullptr;
@@ -454,7 +480,7 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
                 PatchMem(&GetData()->LibName, entry.lib, MaxNameLength);
                 PatchMem(&GetData()->ProcName, entry.symbol, MaxNameLength);
 
-                context.Eip = reinterpret_cast<DWORD>(&GetData()->LoadLibraryFunc);
+                context.Eip = reinterpret_cast<DWORD>(GetLoaderCode());
             }
             else
             {
@@ -610,7 +636,11 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
                     p_code += sizeof(jmp_back);
 
                     auto const actual_sz = static_cast<size_t>(p_code - code.data());
-                    PatchMem(base, code.data(), actual_sz);
+                    if (!PatchMem(base, code.data(), actual_sz))
+                    {
+                        throw_lasterror_or(ERROR_ERRORS_ENCOUNTERED, exe);
+                    }
+                    MakeExecutable(it.second.p_caller_code, sz);
 
                     // dump
                     /*
@@ -637,7 +667,10 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
                     ApplyPatch(code.data(), jmp);
                     ApplyPatch(code.data() + 0x01, rel2);
 
-                    PatchMem(p_original_code, code.data(), code.size());
+                    if (!PatchCode(p_original_code, code.data(), static_cast<DWORD>(code.size())))
+                    {
+                        throw_lasterror_or(ERROR_ERRORS_ENCOUNTERED, exe);
+                    }
                 }
 
                 Log::Flush();
@@ -646,7 +679,10 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
             }
 
             // restore
-            PatchMem(exceptAddr, &Breakpoints[exceptAddr].original_opcode, 1);
+            if (!PatchCode(exceptAddr, &Breakpoints[exceptAddr].original_opcode, 1))
+            {
+                throw_lasterror_or(ERROR_ERRORS_ENCOUNTERED, exe);
+            }
 
             // single step mode
             context.EFlags |= 0x100;
@@ -673,7 +709,10 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
     {
         auto const buffer = INT3;
         auto const& threadInfo = Threads[dbgEvent.dwThreadId];
-        PatchMem(threadInfo.lastBP, &buffer, 1);
+        if (!PatchCode(threadInfo.lastBP, &buffer, 1))
+        {
+            throw_lasterror_or(ERROR_ERRORS_ENCOUNTERED, exe);
+        }
 
         HANDLE hThread = threadInfo.Thread;
         CONTEXT context;
@@ -785,27 +824,19 @@ DWORD SyringeDebugger::HandleException(DEBUG_EVENT const& dbgEvent)
         return DBG_EXCEPTION_NOT_HANDLED;
     }
 
-    return DBG_CONTINUE;
 }
 
 void SyringeDebugger::Run(std::string_view const arguments)
 {
-    constexpr auto AllocDataSize = sizeof(AllocData);
-
     Log::WriteLine(
         __FUNCTION__ ": Running process to debug. cmd = \"%s %.*s\"",
         exe.c_str(), printable(arguments));
     DebugProcess(arguments);
 
-    Log::WriteLine(__FUNCTION__ ": Allocating 0x%u bytes...", AllocDataSize);
-    pAlloc = AllocMem(nullptr, AllocDataSize);
-
-    Log::WriteLine(__FUNCTION__ ": pAlloc = 0x%08X", pAlloc.get());
-
     // write DLL loader code
     Log::WriteLine(__FUNCTION__ ": Writing DLL loader & caller code...");
 
-    static BYTE const cLoadLibrary[] = {
+    static constexpr BYTE cLoadLibrary[] = {
         0x50,								// push eax
         0x51,								// push ecx
         0x52,								// push edx
@@ -823,17 +854,22 @@ void SyringeDebugger::Run(std::string_view const arguments)
         INT3, NOP							// int3 and some padding
     };
 
-    std::array<BYTE, AllocDataSize> data;
-    static_assert(AllocData::CodeSize >= sizeof(cLoadLibrary));
-    ApplyPatch(data.data(), cLoadLibrary);
-    ApplyPatch(data.data() + 0x04, &GetData()->LibName);
-    ApplyPatch(data.data() + 0x0A, pImLoadLibrary);
-    ApplyPatch(data.data() + 0x13, &GetData()->ProcName);
-    ApplyPatch(data.data() + 0x1A, pImGetProcAddress);
-    ApplyPatch(data.data() + 0x1F, &GetData()->ProcAddress);
-    PatchMem(pAlloc, data.data(), data.size());
+    auto code = std::to_array(cLoadLibrary);
+    pLoaderCode = AllocMem(nullptr, code.size());
+    pExchangeData = AllocMem(nullptr, sizeof(ExchangeData));
 
-    Log::WriteLine(__FUNCTION__ ": pcLoadLibrary = 0x%08X", &GetData()->LoadLibraryFunc);
+    ApplyPatch(code.data() + 0x04, &GetData()->LibName);
+    ApplyPatch(code.data() + 0x0A, pImLoadLibrary);
+    ApplyPatch(code.data() + 0x13, &GetData()->ProcName);
+    ApplyPatch(code.data() + 0x1A, pImGetProcAddress);
+    ApplyPatch(code.data() + 0x1F, &GetData()->ProcAddress);
+    if (!PatchMem(pLoaderCode, code.data(), code.size()))
+    {
+        throw_lasterror_or(ERROR_ERRORS_ENCOUNTERED, exe);
+    }
+    MakeExecutable(pLoaderCode, code.size());
+
+    Log::WriteLine(__FUNCTION__ ": pcLoadLibrary = 0x%08X", GetLoaderCode());
 
     // breakpoints for DLL loading and proc address retrieving
     bDLLsLoaded = false;
@@ -842,7 +878,10 @@ void SyringeDebugger::Run(std::string_view const arguments)
     loop_LoadLibrary = v_AllHooks.end();
 
     // set breakpoint
-    SetBP(pcEntryPoint);
+    if (!SetBP(pcEntryPoint))
+    {
+        throw_lasterror_or(ERROR_ERRORS_ENCOUNTERED, exe);
+    }
 
     DEBUG_EVENT dbgEvent;
     ResumeThread(pInfo.hThread);
@@ -945,7 +984,10 @@ void SyringeDebugger::RemoveBP(LPVOID const address, bool const restoreOpcode)
     {
         if (restoreOpcode)
         {
-            PatchMem(address, &i->second.original_opcode, 1);
+            if (!PatchCode(address, &i->second.original_opcode, 1))
+            {
+                throw_lasterror_or(ERROR_ERRORS_ENCOUNTERED, exe);
+            }
         }
 
         Breakpoints.erase(i);
